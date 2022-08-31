@@ -34,9 +34,57 @@ Bonferroni校正即为最严格的多重检验矫正方法。在同一数据集�
 mkdir data
 cd data
 
+# 基因型文件
+wget http://1002genomes.u-strasbg.fr/files/1011Matrix.gvcf.gz
+gzip -d 1011Matrix.gvcf.gz
+
+
+# 表型文件
+wget http://1002genomes.u-strasbg.fr/files/phenoMatrix_35ConditionsNormalizedByYPD.tab.gz
+gzip -d phenoMatrix_35ConditionsNormalizedByYPD.tab.gz
+# 包含了 971 个分离株在 35 中胁迫条件下的生长率（30℃，YPD 培养基）
+
+
+# 分离株信息文件
+wget http://1002genomes.u-strasbg.fr/isolates/page8/files/1002genomes.txt
+# 包含了1011 株分离株的信息（ID、株系名、生态来源、地理来源等）
 
 
 ```
+
+### 数据准备和预处理
+
+```bash
+sed -i '1013,1042d' 1002genomes.txt # 删除多余信息
+tsv-summarize -H --count -g 4 1002genomes.txt | 
+    mlr --itsv --omd cat # 检查不同分离株的来源
+```
+| Ecological origins | count |
+| --- | --- |
+| Wine | 248 |
+| Beer | 59 |
+| Sake | 47 |
+| Unknown | 28 |
+| Distillery | 29 |
+| Bakery | 37 |
+| Human, clinical | 107 |
+| Soil | 38 |
+| Industrial | 30 |
+| Fruit | 47 |
+| Nature | 52 |
+| Water | 19 |
+| Dairy | 27 |
+| Tree | 64 |
+| Fermentation | 36 |
+| Cider | 17 |
+| Palm wine | 30 |
+| Human | 31 |
+| Insect | 20 |
+| Flower | 14 |
+| Probiotic | 2 |
+| Bioethanol | 27 |
+| Lab strain | 2 |
+
 
 
 
@@ -45,5 +93,5 @@ cd data
 
 [2. 什么是Bonferroni校正？| 群体遗传专题](https://zhuanlan.zhihu.com/p/440376273)
 
-
+[3. Fast-LMM](https://github.com/fastlmm/FaST-LMM)
 
