@@ -31,7 +31,7 @@ Bonferroni校正即为最严格的多重检验矫正方法。在同一数据集�
 + 使用文章[《Genome evolution across 1,011 *Saccharomyces cerevisiae* isolates》](https://doi.org/10.1038/s41586-018-0030-5)中的数据 
 
 ```bash
-mkdir data
+mkdir data plink
 cd data
 
 mkdir info pheno ref
@@ -63,7 +63,7 @@ gzip -d ./ref/1011GWASMatrix.tar.gz
 
 >.map文件主要是图谱文件信息，包括染色体编号、SNP名称、染色体的摩尔位置（可选项，可以用0）、SNP的物理位置
 >
->.ped文件主要包括SNP的信息，包括 Family ID(没有可以用个体 ID 代替)、个体 ID、父本编号、母本编号、性别（未知用0）和表型数据
+>.ped文件主要包括SNP的信息，包括 Family ID(没有可以用个体 ID 代替)、个体 ID、父本编号、母本编号、性别（未知用0）和表型数据(0 或者 -9 = unknown；1 = unaffected; 2 = affected)
 >
 >.bim文件储存每个遗传变异的相关信息，每行代表一个遗传变异，共六列（染色体位置、遗传变异的编号、遗传变异在基因组上的摩尔位置、碱基对的坐标、等位基因1、等位基因2）
 >
@@ -73,11 +73,6 @@ gzip -d ./ref/1011GWASMatrix.tar.gz
 
 
 ### 2.3 数据准备和预处理
-+ Plink 下载
-```bash
-brew install plink2
-```
-
 + 简化数据方便计算
 ```bash
 cd ref
@@ -131,19 +126,50 @@ bcftools index --threads 4 1011Matrix.gvcf.gz
 bcftools view -v snps 1011Matrix.gvcf.gz > snp.gvcf 
 
 # 筛选出我们需要的样本信息
-bcftools view --threads 4 -S <(cat ./info/select_info.tsv | cut -f 1) snp.gvcf > tem&&
+bcftools view -S <(cat ./info/select_info.tsv | cut -f 1) snp.gvcf > tem&&
     mv tem snp.gvcf
 
-# 筛选出 MAF > 5% 的点
+bcftools view -h snp.gvcf 
+# 最后一行为表头，可以观察到目前的样本只有筛选后的 230 个
+# CHROM 为染色体的位置、POS 为变异在染色体上的位置、REF 为参考的等位基因、ALT 为突变后的等位基因（多个用逗号分隔）、ID 为遗传变异的 ID（没有就用 .）、QUAL 为变异的质量，代表位点纯合的概率，此值越大则概率越低、FILTER 为次位点是否要被过滤掉、INFO 是变异的相关信息，在表头中有介绍、FORMAT 为表格中变异的格式，同样在表头中有注释
 
-
-
+# 筛选出双等位基因以及 MAF > 0.05 位点（biallelic position）
+bcftools view -m2 -M2 -q 0.05 -Q 0.95 snp.gvcf > tem&&
+    mv tem snp.gvcf
 ```
+
++ 使用 Plink 继续进行质控制和后续的分析
+```bash
+brew install plink2
+
+cd plink
+plink2 --vcf ../data/snp.gvcf --recode --out SELECT --double-id --allow-extra-chr
+
+# 对样本进行质量控制（样本缺失率大于5%去除）
+mkdir sample_qc
+plink2 --file SELECT --mind 0.05 --make-bed --out ./sample_qc/sample_qc --allow-extra-chr
+wc -l SELECT.ped ./sample_qc/sample_qc.fam
+# 230
+# 120(过滤后样本数减少为120)
+
+# 对 SNP 位点进行质量控制
+mkdir SNP_qc
+plink2 -bfile ./sample_qc/sample_qc --hwe 0.00001 --geno 0.02 --make-bed --out ./SNP_qc/SNP_qc --allow-extra-chr
+wc -l SELECT.map ./SNP_qc/SNP_qc.bim 
+# 128802
+# 15839(过滤后 SNP 数量减少)
+```
+
 > 1. 为什么对MAF进行过滤
-> MAF:minor allele frequency,次等位基因频率；某个一个位点有AA或AT或TT，那么就可以计算A的基因频率和T的基因频率，qA + qT = 1，这里谁比较小，谁就是最小等位基因频率，qA = 0.3，qT = 0.7，那么这个位点的 MAF 为 0.3（如果一个位点有三个等位基因，那么频率排在中间的是 MAF；如果一个位点有四个等位基因，那么频率）。之所以用这个过滤标准，是因为 MAF 如果非常小，那么意味着大部分位点都是相同的基因型，这些位点贡献的信息非常少，放在计算中增加计算量，增加了假阳性的可能。
+> MAF:minor allele frequency,次等位基因频率；某个一个位点有AA或AT或TT，那么就可以计算A的基因频率和T的基因频率，qA + qT = 1，这里谁比较小，谁就是最小等位基因频率，qA = 0.3，qT = 0.7，那么这个位点的 MAF 为 0.3（如果一个位点有三个等位基因，那么频率排在中间的、第二大是 MAF；如果一个位点有四个等位基因，那么频率为第二大的为 MAF）。之所以用这个过滤标准，是因为 MAF 如果非常小，那么意味着大部分位点都是相同的基因型，这些位点贡献的信息非常少，放在计算中增加计算量，增加了假阳性的可能。
 >
+>2. 为什么只考虑双等位基因？
+> 减少计算量？
 >
->
+>3. 哈温（Haed-Weinberg）平衡检验
+>在理想状态（种群足够大、种群个体间随机交配、没有突变、没有选择、没有迁移、没有遗传漂变）下，各等位基因的频率在遗传中是稳定不变的。为什么要去除不符合的位点？
+
+
 
 ## 3 参考
 [1. GWAS 分析](https://zhuanlan.zhihu.com/p/158869408)
@@ -154,5 +180,6 @@ bcftools view --threads 4 -S <(cat ./info/select_info.tsv | cut -f 1) snp.gvcf >
 
 [4. plink格式文件的介绍及相互转换](https://blog.csdn.net/qq_22253901/article/details/121608557)
 
+[5. VCF文件解读](https://www.jianshu.com/p/a108790ad2a6?u_atoken=b042a893-03bd-4a38-8031-52f0d3f65353&u_asession=01lCes1MtWioqAIP_RItPwcuzj6hQ37QKxHHGlYxXawwEBiPTC8Ag56DVIqub2V-f9X0KNBwm7Lovlpxjd_P_q4JsKWYrT3W_NKPr8w6oU7K_pY8fQ6FgtGe1q2uu-pEeJh4gB_rorF7cG9vr14abfLGBkFo3NEHBv0PZUm6pbxQU&u_asig=05ESJ0rAXmqHXPIepLzgwTZsuqSHavU9_kPUis9ZnDVBSXtNlBC9h0t4_dTYWj-zy5NnvV3cVdjT2zrkAtku5L4yJxs3aynCvlGiT_Ub66P0OM-iPBV-Ab_KzVnc8ABe8ZceNDbk5keBc6Xq837uhdStGvS2XQ8opQZn8Aipfp0uL9JS7q8ZD7Xtz2Ly-b0kmuyAKRFSVJkkdwVUnyHAIJzRADLOfJygZ2zefxmuwu51PbAMUp1ftJmFa5oLwIVmFkU-X92pnuaZyu-ch7KXFYKu3h9VXwMyh6PgyDIVSG1W9VWGQ0BJ8FO2D990EYuxyemfC2no16gp6PDScqDB1dOPIj5IcN8seykp_tZiDxsyT7xYdsOTzck1OTWHNmt6LNmWspDxyAEEo4kbsryBKb9Q&u_aref=68wg77kctEKwOJA%2F8Eal%2FkCiJXw%3D)
 
-
+[6. VCF转换PLINK格式的3种方法](https://blog.51cto.com/u_10721944/5398621)
