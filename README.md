@@ -31,7 +31,7 @@ Bonferroni校正即为最严格的多重检验矫正方法。在同一数据集�
 + 使用文章[《Genome evolution across 1,011 *Saccharomyces cerevisiae* isolates》](https://doi.org/10.1038/s41586-018-0030-5)中的数据 
 
 ```bash
-mkdir data plink
+mkdir data plink PCA association
 cd data
 
 mkdir info pheno ref
@@ -154,7 +154,7 @@ wc -l SELECT.ped ./sample_qc/sample_qc.fam
 
 # 对 SNP 位点进行质量控制
 mkdir SNP_qc
-plink2 -bfile ./sample_qc/sample_qc --hwe 0.00001 --geno 0.02 --make-bed --out ./SNP_qc/SNP_qc --allow-extra-chr
+plink2 --bfile ./sample_qc/sample_qc --hwe 0.00001 --geno 0.02 --make-bed --out ./SNP_qc/SNP_qc --allow-extra-chr
 wc -l SELECT.map ./SNP_qc/SNP_qc.bim 
 # 128802
 # 15839(过滤后 SNP 数量减少)
@@ -170,6 +170,54 @@ wc -l SELECT.map ./SNP_qc/SNP_qc.bim
 >在理想状态（种群足够大、种群个体间随机交配、没有突变、没有选择、没有迁移、没有遗传漂变）下，各等位基因的频率在遗传中是稳定不变的。为什么要去除不符合的位点？
 
 
+## 2.4 群体分层校正
++ 原因
+GWAS研究时经常碰到群体分层的现象，即该群体的祖先来源多样性，我们知道的，不同群体SNP频率不一样，导致后面做关联分析的时候可能出现假阳性位点（不一定是显著信号位点与该表型有关，可能是与群体 SNP 频率差异有关），因此我们需要在关联分析前对该群体做PCA分析，随后将PCA结果作为协变量加入关联分析中。
+
+```bash
+cd PCA
+plink2 --bfile ../plink/SNP_qc/SNP_qc --pca 10 --out SNP_qc_pca --allow-extra-chr
+# --pca 后面的数字表示选取了几个关注的主成分，具体后续关联分析中要选多少个，还要看哪些主成分有显著的统计学意义
+```
+
++ 利用 twstats 计算显著的主成分
+```bash
+# 软件下载
+wget https://data.broadinstitute.org/alkesgroup/EIGENSOFT/EIG-6.1.4.tar.gz
+tar xzvf EIG-6.1.4.tar.gz
+
+cd EIG-6.1.4/bin
+export PATH="$(pwd):$PATH"
+source $HOME/.bashrc 
+
+# 计算显著性
+cd PCA
+twstats -t twtable -i SNP_qc_pca.eigenval -o eigenvaltw.out
+cat eigenvaltw.out | 
+    mlr --itsv --omd cat
+```
+|   #N    eigenvalue  difference    twstat      p-value effect. n |
+| --- |
+|    1     32.902700          NA     0.453    0.0996149     7.632 |
+|    2      9.772170  -23.130530        NA           NA        NA |
+|    3      5.315390   -4.456780        NA           NA        NA |
+|    4      5.267640   -0.047750        NA           NA        NA |
+|    5      3.474320   -1.793320        NA           NA        NA |
+|    6      3.276360   -0.197960        NA           NA        NA |
+|    7      2.855760   -0.420600        NA           NA        NA |
+|    8      2.745790   -0.109970        NA           NA        NA |
+|    9      2.649630   -0.096160        NA           NA        NA |
+|   10      2.434010   -0.215620        NA           NA        NA |
+
+测试所得到的10各主成分都没有显著性？
+
+## 2.5 关联性分析
+```bash
+cd association
+
+
+```
+
 
 ## 3 参考
 [1. GWAS 分析](https://zhuanlan.zhihu.com/p/158869408)
@@ -183,3 +231,5 @@ wc -l SELECT.map ./SNP_qc/SNP_qc.bim
 [5. VCF文件解读](https://www.jianshu.com/p/a108790ad2a6?u_atoken=b042a893-03bd-4a38-8031-52f0d3f65353&u_asession=01lCes1MtWioqAIP_RItPwcuzj6hQ37QKxHHGlYxXawwEBiPTC8Ag56DVIqub2V-f9X0KNBwm7Lovlpxjd_P_q4JsKWYrT3W_NKPr8w6oU7K_pY8fQ6FgtGe1q2uu-pEeJh4gB_rorF7cG9vr14abfLGBkFo3NEHBv0PZUm6pbxQU&u_asig=05ESJ0rAXmqHXPIepLzgwTZsuqSHavU9_kPUis9ZnDVBSXtNlBC9h0t4_dTYWj-zy5NnvV3cVdjT2zrkAtku5L4yJxs3aynCvlGiT_Ub66P0OM-iPBV-Ab_KzVnc8ABe8ZceNDbk5keBc6Xq837uhdStGvS2XQ8opQZn8Aipfp0uL9JS7q8ZD7Xtz2Ly-b0kmuyAKRFSVJkkdwVUnyHAIJzRADLOfJygZ2zefxmuwu51PbAMUp1ftJmFa5oLwIVmFkU-X92pnuaZyu-ch7KXFYKu3h9VXwMyh6PgyDIVSG1W9VWGQ0BJ8FO2D990EYuxyemfC2no16gp6PDScqDB1dOPIj5IcN8seykp_tZiDxsyT7xYdsOTzck1OTWHNmt6LNmWspDxyAEEo4kbsryBKb9Q&u_aref=68wg77kctEKwOJA%2F8Eal%2FkCiJXw%3D)
 
 [6. VCF转换PLINK格式的3种方法](https://blog.51cto.com/u_10721944/5398621)
+
+[7. 全基因组关联分析学习资料](https://www.jianshu.com/p/cf1a3fabd96a)
