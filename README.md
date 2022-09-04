@@ -161,12 +161,15 @@ wc -l SELECT.map ./SNP_qc/SNP_qc.bim
 ```
 
 > 1. 为什么对MAF进行过滤
+>
 > MAF:minor allele frequency,次等位基因频率；某个一个位点有AA或AT或TT，那么就可以计算A的基因频率和T的基因频率，qA + qT = 1，这里谁比较小，谁就是最小等位基因频率，qA = 0.3，qT = 0.7，那么这个位点的 MAF 为 0.3（如果一个位点有三个等位基因，那么频率排在中间的、第二大是 MAF；如果一个位点有四个等位基因，那么频率为第二大的为 MAF）。之所以用这个过滤标准，是因为 MAF 如果非常小，那么意味着大部分位点都是相同的基因型，这些位点贡献的信息非常少，放在计算中增加计算量，增加了假阳性的可能。
 >
 >2. 为什么只考虑双等位基因？
+>
 > 减少计算量？
 >
 >3. 哈温（Haed-Weinberg）平衡检验
+>
 >在理想状态（种群足够大、种群个体间随机交配、没有突变、没有选择、没有迁移、没有遗传漂变）下，各等位基因的频率在遗传中是稳定不变的。为什么要去除不符合的位点？
 
 
@@ -213,9 +216,52 @@ cat eigenvaltw.out |
 
 ## 2.5 关联性分析
 ```bash
+# 用法：plink2 --bfile mydata --linear --pheno pheno.txt --mpheno 1 --covar covar.txt --covar-number 1,2,3 --out mydata -noweb --allow-extra-chr
+
+# --linear表示用的连续型线性回归，如果表型是二项式类型，则用--logistic
+# --pheno后面加表型文件（第一列和第二列是 Fanily ID 和 Individual ID;第三列以后的每一列都是表型）
+# --covar后面加协变量文件（第一列和第二列是 Fanily ID 和 Individual ID;第三列以后的每一列都是协变量，可以是之前计算的 pca 主成分）
+# --mpheno 1指的是表型文件的第三列（第一个表型）
+# --covar-number 1,2,3 指的是协变量文件的第三列、第四列和第五列（第一个、第二个和第三个协变量）
+
+# 构建表型文件
+cd data/pheno
+
+sed '1d' phenoMatrix_35ConditionsNormalizedByYPD.tab | grep -w -f <(cut -d " " -f 1 ../../plink/sample_qc/sample_qc.fam) | perl -a -F"\t" -n -e'
+    print "@F[0]\t$_";
+' > pheno.txt
+
+wc -l pheno.txt
+# 110
+# 有 10 个样本没有表型，对后续分析是否有影响
+
+# 关联分析
 cd association
 
+plink2 -bfile ../plink/SNP_qc/SNP_qc --linear --pheno ../data/pheno/pheno.txt --mpheno 1 --allow-extra-chr -noweb --allow-no-sex --out mydata
 
+# 结果存放在mydata.assoc.linear文件中
+```
+
+## 2.6 可视化
+### 2.6.1 曼哈顿图
+
+```bash
+sed -i 's/^chromosome//' mydata.assoc.linear
+# 删除前缀方便后续分析
+cat mydata.assoc.linear | grep -w -v "NA" > tem&&
+    mv tem mydata.assoc.linear
+# 删除 p 值为 NA 的点
+```
+
+```R
+install.packages("qqman")
+library(qqman)
+
+FILE <- "mydata.assoc.linear"
+gwasRESULT <- read.table(FILE, header = TRUE)
+manhattan(gwasRESULT)
+# 默认的 suggestiveline 为 -log10(1e-5),而 genome-wide sigificant为 -log10(5e-8)
 ```
 
 
