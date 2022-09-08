@@ -50,9 +50,9 @@ wget http://1002genomes.u-strasbg.fr/isolates/page8/files/1002genomes.txt -P inf
 # 包含了1011 株分离株的信息（ID、株系名、生态来源、地理来源等）
 
 
-# 用于 GWAS 的矩阵
-wget http://1002genomes.u-strasbg.fr/files/1011GWASMatrix.tar.gz -P ref
-gzip -d ./ref/1011GWASMatrix.tar.gz
+# 用于 GWAS 的矩阵（已经完成过滤），用于参考
+# wget http://1002genomes.u-strasbg.fr/files/1011GWASMatrix.tar.gz -P ref
+# gzip -d ./ref/1011GWASMatrix.tar.gz
 # 包含了 .bed、.bim 和 .fam 三个文件
 ```
 
@@ -73,21 +73,15 @@ gzip -d ./ref/1011GWASMatrix.tar.gz
 
 
 ### 2.3 数据准备和预处理
-+ 简化数据方便计算
++ 查看菌株信息
 ```bash
-cd ref
+cd info
 sed -i '1013,1042d' 1002genomes.txt # 删除多余信息
 tsv-summarize -H --count -g 4 1002genomes.txt | 
     mlr --itsv --omd cat # 检查不同分离株的来源
 
-# 为了简化计算量，我们选取 Beer、Tree 和 Human, clinical 这三种来源的酵母数据进行操作
-for i in Beer Tree 'Human, clinical'; do
-    tsv-filter --str-eq 4:"$i" 1002genomes.txt |
-    tsv-select -f 1,4 >> select_info.tsv
-done 
-
-wc -l select_info.tsv
-# 230
+cat 1002genomes.txt | tail -n+2 | wc -l
+# 1011 株菌株
 ```
 | Ecological origins | count |
 | --- | --- |
@@ -120,21 +114,21 @@ wc -l select_info.tsv
 质控一般包含两个方向：[一个是样本的质量控制（缺失率 < 5%;杂合性等）；另一个是 SNP 位点的质量控制（MAF > 5%; 哈温平衡检验等）](https://zhuanlan.zhihu.com/p/149947873?from_voters_page=true)
 
 ```bash
+cd data
 # 筛选出其中的 SNP 位点
 brew install bcftools
 bcftools index --threads 4 1011Matrix.gvcf.gz
 bcftools view -v snps 1011Matrix.gvcf.gz > snp.gvcf 
-
-# 筛选出我们需要的样本信息
-bcftools view -S <(cat ./info/select_info.tsv | cut -f 1) snp.gvcf > tem&&
-    mv tem snp.gvcf
-
 bcftools view -h snp.gvcf 
-# 最后一行为表头，可以观察到目前的样本只有筛选后的 230 个
-# CHROM 为染色体的位置、POS 为变异在染色体上的位置、REF 为参考的等位基因、ALT 为突变后的等位基因（多个用逗号分隔）、ID 为遗传变异的 ID（没有就用 .）、QUAL 为变异的质量，代表位点纯合的概率，此值越大则概率越低、FILTER 为次位点是否要被过滤掉、INFO 是变异的相关信息，在表头中有介绍、FORMAT 为表格中变异的格式，同样在表头中有注释
+# 最后一行为表头
+# CHROM 为染色体的位置、POS 为变异在染色体上的位置、REF 为参考的等位基因、ALT 为突变后的等位基因（多个用逗号分隔）、ID 为遗传变异的 ID（没有就用 .）、QUAL 为变异的质量，代表位点纯合的概率，此值越大则概率越低、FILTER 为次位点是否要被过滤掉、INFO 是变异的相关信息，在表头中有介绍、FORMAT 为表格中变异的格式，同样在表头中有注释，后面的每一列为样本信息
 
-# 筛选出双等位基因以及 MAF > 0.05 位点（biallelic position）
-bcftools view -m2 -M2 -q 0.05 -Q 0.95 snp.gvcf > tem&&
+# 观察一下gvcf文件的格式
+cat snp.gvcf | grep -v "#" | head -n 1 | cut -f 1,2,3,4,5,6,7,8,9,10,11
+# chromosome1     63      .       T       C       223.1   .       AC=4;AF=0.071;AN=56;DP=5226;FS=0;GQ_MEAN=6.82;GQ_STDDEV=19.33;InbreedingCoeff=0.0885;MLEAC=7;MLEAF=0.125;MQ=29.24;MQ0=0;NCC=965;QD=30.63;SOR=0.148      GT:AD:DP:GQ:PGT:PID:PL ./.:0,0:0:.:.:.:.        ./.:0,0:0:.:.:.:.
+
+# 筛选出双等位基因位点（biallelic position）
+bcftools view -m2 -M2 snp.gvcf > tem&&
     mv tem snp.gvcf
 ```
 
@@ -148,16 +142,12 @@ plink2 --vcf ../data/snp.gvcf --recode --out SELECT --double-id --allow-extra-ch
 # 对样本进行质量控制（样本缺失率大于5%去除）
 mkdir sample_qc
 plink2 --file SELECT --mind 0.05 --make-bed --out ./sample_qc/sample_qc --allow-extra-chr
-wc -l SELECT.ped ./sample_qc/sample_qc.fam
-# 230
-# 120(过滤后样本数减少为120)
+# 1544489 variants and 1011 people pass filters and QC.
 
 # 对 SNP 位点进行质量控制
 mkdir SNP_qc
-plink2 --bfile ./sample_qc/sample_qc --hwe 0.00001 --geno 0.02 --make-bed --out ./SNP_qc/SNP_qc --allow-extra-chr
-wc -l SELECT.map ./SNP_qc/SNP_qc.bim 
-# 128802
-# 15839(过滤后 SNP 数量减少)
+plink2 --bfile ./sample_qc/sample_qc --maf 0.05 --geno 0.02 --make-bed --out ./SNP_qc/SNP_qc --allow-extra-chr
+# 94638 variants and 1011 people pass filters and QC.
 ```
 
 > 1. 为什么对MAF进行过滤
@@ -166,7 +156,7 @@ wc -l SELECT.map ./SNP_qc/SNP_qc.bim
 >
 >2. 为什么只考虑双等位基因？
 >
-> 减少计算量？
+> 减少计算量？LD衰减计算？
 >
 >3. 哈温（Haed-Weinberg）平衡检验
 >
@@ -196,21 +186,20 @@ source $HOME/.bashrc
 # 计算显著性
 cd PCA
 twstats -t twtable -i SNP_qc_pca.eigenval -o eigenvaltw.out
-cat eigenvaltw.out | 
-    mlr --itsv --omd cat
+cat eigenvaltw.out | mlr --itsv --omd cat
 ```
 |   #N    eigenvalue  difference    twstat      p-value effect. n |
 | --- |
-|    1     32.902700          NA     0.453    0.0996149     7.632 |
-|    2      9.772170  -23.130530        NA           NA        NA |
-|    3      5.315390   -4.456780        NA           NA        NA |
-|    4      5.267640   -0.047750        NA           NA        NA |
-|    5      3.474320   -1.793320        NA           NA        NA |
-|    6      3.276360   -0.197960        NA           NA        NA |
-|    7      2.855760   -0.420600        NA           NA        NA |
-|    8      2.745790   -0.109970        NA           NA        NA |
-|    9      2.649630   -0.096160        NA           NA        NA |
-|   10      2.434010   -0.215620        NA           NA        NA |
+|    1    583.746000          NA     0.050     0.159242     5.003 |
+|    2    146.681000 -437.065000        NA           NA        NA |
+|    3     87.091600  -59.589400        NA           NA        NA |
+|    4     56.336500  -30.755100        NA           NA        NA |
+|    5     40.847400  -15.489100        NA           NA        NA |
+|    6     37.342400   -3.505000        NA           NA        NA |
+|    7     29.374400   -7.968000        NA           NA        NA |
+|    8     26.194900   -3.179500        NA           NA        NA |
+|    9     25.032900   -1.162000        NA           NA        NA |
+|   10     23.141700   -1.891200        NA           NA        NA |
 
 测试所得到的10各主成分都没有显著性？
 
@@ -227,13 +216,12 @@ cat eigenvaltw.out |
 # 构建表型文件
 cd data/pheno
 
-sed '1d' phenoMatrix_35ConditionsNormalizedByYPD.tab | grep -w -f <(cut -d " " -f 1 ../../plink/sample_qc/sample_qc.fam) | perl -a -F"\t" -n -e'
+sed '1d' phenoMatrix_35ConditionsNormalizedByYPD.tab | grep -w -f <(cut -d " " -f 1 ../../plink/SNP_qc/SNP_qc.fam) | perl -a -F"\t" -n -e'
     print "@F[0]\t$_";
 ' > pheno.txt
 
 wc -l pheno.txt
-# 110
-# 有 10 个样本没有表型，对后续分析是否有影响
+# 971个菌株有表型
 
 # 关联分析
 cd association
@@ -263,6 +251,8 @@ gwasRESULT <- read.table(FILE, header = TRUE)
 manhattan(gwasRESULT)
 # 默认的 suggestiveline 为 -log10(1e-5),而 genome-wide sigificant为 -log10(5e-8)
 ```
+![](./Fig/man.png)
+
 
 
 ## 3 参考
