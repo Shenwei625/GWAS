@@ -139,15 +139,50 @@ brew install plink2
 cd plink
 plink2 --vcf ../data/snp.gvcf --recode --out SELECT --double-id --allow-extra-chr
 
+# 查看数据缺失情况
+mkdir pre_view
+plink2 --file SELECT --missing --out ./pre_view/pre_view --allow-extra-chr
+# Sample missing data report written to ./pre_view/pre_view.imiss
+# variant-based missing data report written to ./pre_view/pre_view.lmiss
+```
+>**个体缺失位点统计预览**
+>
+>第一列为家系ID，第二列为个体ID，第三列是否表型缺失，第四列缺失的SNP个数，第五列总SNP个数，第六列缺失率
+>
+>**SNP缺失的个体数文件预览**
+>
+>第一列为染色体，第二列为SNP名称，第三列为缺失个数，第四列为总个数，第五列为缺失率
+
++ 可视化
+```bash
+# Sample
+sed -i 's/^\s\+//g' pre_view/pre_view.imiss
+sed -i 's/\s\+/\t/g' pre_view/pre_view.imiss
+plotr hist pre_view/pre_view.imiss -c 6 --xl "SAMPLE_MISSING" --device png -o pre_view/sample.png
+
+# SNP
+sed -i 's/^\s\+//g' pre_view/pre_view.lmiss
+sed -i 's/\s\+/\t/g' pre_view/pre_view.lmiss
+plotr hist pre_view/pre_view.lmiss -c 5 --xmm 0,0.01 --ymm 0,2e+5 --xl "SNP_MISSING" --device png -o pre_view/SNP.png
+```
+![](./Fig/sample.png)
+
+0.03为分界
+
+![](./Fig/SNP.png)
+
+0.005为分界
+
+```bash
 # 对样本进行质量控制（样本缺失率大于5%去除）
 mkdir sample_qc
-plink2 --file SELECT --mind 0.05 --make-bed --out ./sample_qc/sample_qc --allow-extra-chr
-# 1544489 variants and 1011 people pass filters and QC.
+plink2 --file SELECT --mind 0.03 --make-bed --out ./sample_qc/sample_qc --allow-extra-chr
+# 1544489 variants and 989 people pass filters and QC.
 
 # 对 SNP 位点进行质量控制
 mkdir SNP_qc
-plink2 --bfile ./sample_qc/sample_qc --maf 0.05 --geno 0.02 --make-bed --out ./SNP_qc/SNP_qc --allow-extra-chr
-# 94638 variants and 1011 people pass filters and QC.
+plink2 --bfile ./sample_qc/sample_qc --geno 0.005 --maf 0.05 --make-bed --out ./SNP_qc/SNP_qc --allow-extra-chr
+# 85227 variants and 989 people pass filters and QC.
 ```
 
 > 1. 为什么对MAF进行过滤
@@ -160,7 +195,7 @@ plink2 --bfile ./sample_qc/sample_qc --maf 0.05 --geno 0.02 --make-bed --out ./S
 >
 >3. 哈温（Haed-Weinberg）平衡检验
 >
->在理想状态（种群足够大、种群个体间随机交配、没有突变、没有选择、没有迁移、没有遗传漂变）下，各等位基因的频率在遗传中是稳定不变的。为什么要去除不符合的位点？
+>在理想状态（种群足够大、种群个体间随机交配、没有突变、没有选择、没有迁移、没有遗传漂变）下，各等位基因的频率在遗传中是稳定不变的。为什么要去除不符合的位点？这边是否需要进行检验？
 
 
 ## 2.4 群体分层校正
@@ -190,16 +225,16 @@ cat eigenvaltw.out | mlr --itsv --omd cat
 ```
 |   #N    eigenvalue  difference    twstat      p-value effect. n |
 | --- |
-|    1    583.746000          NA     0.050     0.159242     5.003 |
-|    2    146.681000 -437.065000        NA           NA        NA |
-|    3     87.091600  -59.589400        NA           NA        NA |
-|    4     56.336500  -30.755100        NA           NA        NA |
-|    5     40.847400  -15.489100        NA           NA        NA |
-|    6     37.342400   -3.505000        NA           NA        NA |
-|    7     29.374400   -7.968000        NA           NA        NA |
-|    8     26.194900   -3.179500        NA           NA        NA |
-|    9     25.032900   -1.162000        NA           NA        NA |
-|   10     23.141700   -1.891200        NA           NA        NA |
+|    1    554.908000          NA     0.090     0.152332     5.289 |
+|    2    147.262000 -407.646000        NA           NA        NA |
+|    3     85.186900  -62.075100        NA           NA        NA |
+|    4     57.778100  -27.408800        NA           NA        NA |
+|    5     39.611400  -18.166700        NA           NA        NA |
+|    6     38.321900   -1.289500        NA           NA        NA |
+|    7     30.709800   -7.612100        NA           NA        NA |
+|    8     26.640000   -4.069800        NA           NA        NA |
+|    9     24.994700   -1.645300        NA           NA        NA |
+|   10     23.543500   -1.451200        NA           NA        NA |
 
 测试所得到的10各主成分都没有显著性？
 
@@ -249,7 +284,7 @@ library(qqman)
 FILE <- "mydata.assoc.linear"
 gwasRESULT <- read.table(FILE, header = TRUE)
 manhattan(gwasRESULT)
-# 默认的 suggestiveline 为 -log10(1e-5),而 genome-wide sigificant为 -log10(5e-8)
+# 默认的 suggestiveline（蓝色） 为 -log10(1e-5),而 genome-wide sigificant（红色） 为 -log10(5e-8)
 ```
 ![](./Fig/man.png)
 
