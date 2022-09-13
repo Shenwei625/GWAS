@@ -173,13 +173,47 @@ plotr hist pre_view/pre_view.lmiss -c 5 --xmm 0,0.01 --ymm 0,2e+5 --xl "SNP_MISS
 
 0.005为分界
 
++ 对 SNP 命名，方便后续查找显著的点
 ```bash
-# 对样本进行质量控制（样本缺失率大于5%去除）
+# 修改 SELECT.map 文件的第二列
+cat SELECT.map | perl -a -F"\t" -ne'
+    $n = $n + 1;
+    print "@F[0]\tSNP$n\t@F[2]\t@F[3]";
+' > tem&&
+    mv tem SELECT.map
+```
+
++ 对样本进行质量控制
+```bash
+# 样本数据缺失率大于5%去除
 mkdir sample_qc
 plink2 --file SELECT --mind 0.03 --make-bed --out ./sample_qc/sample_qc --allow-extra-chr
 # 1544489 variants and 989 people pass filters and QC.
 
-# 对 SNP 位点进行质量控制
+# 对样本的杂合率进行控制
+mkdir sample_het
+plink2 --bfile ./sample_qc/sample_qc --het --make-bed --out ./sample_het/sample_het --allow-extra-chr
+# --het: 1524403 variants scanned, report written to ./sample_het/sample_het.het
+# O(HOM)	Observed number of homozygotes
+# E(HOM)	Expected number of homozygotes 
+# N(NM) Number of non-missing autosomal genotypes 
+# 杂合度 = (N-O)/N
+
+# 计算杂合度
+sed -i 's/^\s\+//g' ./sample_het/sample_het.het
+sed -i 's/\s\+/\t/g' ./sample_het/sample_het.het
+
+sed '1d' ./sample_het/sample_het.het | perl -a -F"\t" -ne'
+    chomp($_);
+    $HET = ( @F[4] - @F[2] ) / @F[4];
+    print "$_\t$HET\n";
+' > ./sample_het/Heterozygosity.tsv
+# 杂合度都比较低
+```
+
++ 对 SNP 位点进行质量控制
+```bash
+# MAF、缺失率
 mkdir SNP_qc
 plink2 --bfile ./sample_qc/sample_qc --geno 0.005 --maf 0.05 --make-bed --out ./SNP_qc/SNP_qc --allow-extra-chr
 # 85227 variants and 989 people pass filters and QC.
@@ -196,6 +230,7 @@ plink2 --bfile ./sample_qc/sample_qc --geno 0.005 --maf 0.05 --make-bed --out ./
 >3. 哈温（Haed-Weinberg）平衡检验
 >
 >在理想状态（种群足够大、种群个体间随机交配、没有突变、没有选择、没有迁移、没有遗传漂变）下，各等位基因的频率在遗传中是稳定不变的。为什么要去除不符合的位点？这边是否需要进行检验？
+
 
 
 ## 2.4 群体分层校正
@@ -216,7 +251,6 @@ tar xzvf EIG-6.1.4.tar.gz
 
 cd EIG-6.1.4/bin
 export PATH="$(pwd):$PATH"
-source $HOME/.bashrc 
 
 # 计算显著性
 cd PCA
@@ -261,10 +295,17 @@ wc -l pheno.txt
 # 关联分析
 cd association
 
-plink2 -bfile ../plink/SNP_qc/SNP_qc --linear --pheno ../data/pheno/pheno.txt --mpheno 1 --allow-extra-chr -noweb --allow-no-sex --out mydata
+plink2 -bfile ../plink/SNP_qc/SNP_qc --linear --pheno ../data/pheno/pheno.txt --mpheno 1 --adjust --allow-extra-chr -noweb --allow-no-sex --out mydata
 
-# 结果存放在mydata.assoc.linear文件中
+# 结果存放在 mydata.assoc.linear 文件中,mydata.assoc.linear.adjusted 中存放了校正的p值
 ```
+>**.adjusted文件**
+>GC：Genomic control corrected p-value. Requires an additive model.
+>BONF：Bonferroni correction adjusted p-value.
+>HOLM：Holm-Bonferroni adjusted p-value.
+>SIDAK_SS：Single-step adjusted p-value.
+>SIDAK_SD：Step-down adjusted p-value.
+>FDR_BH：Step-up false discovery control
 
 ## 2.6 可视化
 ### 2.6.1 曼哈顿图
@@ -304,3 +345,5 @@ manhattan(gwasRESULT)
 [6. VCF转换PLINK格式的3种方法](https://blog.51cto.com/u_10721944/5398621)
 
 [7. 全基因组关联分析学习资料](https://www.jianshu.com/p/cf1a3fabd96a)
+
+[8. 笔记 | GWAS 操作流程3：Plink 关联分析](http://www.360doc.com/content/21/1118/13/77772224_1004706906.shtml)
