@@ -18,6 +18,14 @@ Bonferroni校正即为最严格的多重检验矫正方法。在同一数据集�
 
 由于GWAS标记之间的连锁不平衡，可能会存在多个标记或者SNP之间相互连锁的情况，也就是说它们之间的分布并不是完全独立的，所以假设GWAS数据集的每个关联测试都是独立的是不正确的。因此，应用Bonferroni校正通常会为我们提供最保守的p值阈值，其中可能会出现假阴性的情况，我们往往需要根据实际曼哈顿图的情况对阈值进行一些调整。
 
+### 1.3 FDR 校正
+FDR（False discovery rate）,表示假阳性率
+
++ BH（Benjaminiand Hochberg）法计算原理
+
+将每个点的 P 值按照从大到小排序，然后利用公式：P*(n/i) 来计算所对应的 FDR 值；其中 P 是这一次检验的pvalue，n 是检验的次数，i 是排序后的位置 ID（最大的 P 对应的 i 是 n，最小的是 1）；
+如果某一个p值所对应的FDR值大于前一位p值（排序的前一位）所对应的FDR值，则放弃公式计算出来的FDR值，选用与它前一位相同的值。因此会产生连续相同FDR值的现象；反之则保留计算的FDR值。
+
 ### 1.3 GWAS曼哈顿图分析
 ![](./Fig/MHD.jpg)
 
@@ -313,9 +321,14 @@ plink2 -bfile ../plink/SNP_qc/SNP_qc --linear --pheno ../data/pheno/pheno.txt --
 ```bash
 sed -i 's/^chromosome//' mydata.assoc.linear
 # 删除前缀方便后续分析
-cat mydata.assoc.linear | grep -w -v "NA" > tem&&
-    mv tem mydata.assoc.linear
-# 删除 p 值为 NA 的点
+
+for i in mydata.assoc.linear mydata.assoc.linear.adjusted;do
+    sed -i 's/^\s\+//g' $i
+    sed -i 's/\s\+/\t/g' $i
+done
+
+tsv-join -H --filter-file mydata.assoc.linear.adjusted --key-fields SNP --append-fields FDR_BH <(tsv-select -H --exclude P mydata.assoc.linear) > RESULT.tsv
+sed -i 's/\tFDR_BH/P/' RESULT.tsv
 ```
 
 ```R
@@ -327,8 +340,14 @@ gwasRESULT <- read.table(FILE, header = TRUE)
 manhattan(gwasRESULT)
 # 默认的 suggestiveline（蓝色） 为 -log10(1e-5),而 genome-wide sigificant（红色） 为 -log10(5e-8)
 ```
+
++ 未校正 P 值
+
 ![](./Fig/man.png)
 
++ FDR_BH 校正后的 P 值
+
+![](./Fig/BH.png)
 
 
 ## 3 参考
