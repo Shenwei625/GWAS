@@ -308,11 +308,17 @@ plink2 -bfile ../plink/SNP_qc/SNP_qc --linear --pheno ../data/pheno/pheno.txt --
 # 结果存放在 mydata.assoc.linear 文件中,mydata.assoc.linear.adjusted 中存放了校正的p值
 ```
 >**.adjusted文件**
+>
 >GC：Genomic control corrected p-value. Requires an additive model.
+>
 >BONF：Bonferroni correction adjusted p-value.
+>
 >HOLM：Holm-Bonferroni adjusted p-value.
+>
 >SIDAK_SS：Single-step adjusted p-value.
+>
 >SIDAK_SD：Step-down adjusted p-value.
+>
 >FDR_BH：Step-up false discovery control
 
 ## 2.6 可视化
@@ -339,6 +345,12 @@ FILE <- "mydata.assoc.linear"
 gwasRESULT <- read.table(FILE, header = TRUE)
 manhattan(gwasRESULT)
 # 默认的 suggestiveline（蓝色） 为 -log10(1e-5),而 genome-wide sigificant（红色） 为 -log10(5e-8)
+
+manhattan(gwasRESULT, annotatePval = 0.0000001)
+# 显示校正后 P 值小于 0.0000001 的点
+
+manhattan(subset(gwasRESULT,CHR == 13),annotatePval = 0.0000001)
+# 只关注 13 号染色体上的突变
 ```
 
 + 未校正 P 值
@@ -347,7 +359,7 @@ manhattan(gwasRESULT)
 
 + FDR_BH 校正后的 P 值
 
-![](./Fig/BH.png)
+![](./Fig/FDR.png)
 
 
 ## 3 参考
