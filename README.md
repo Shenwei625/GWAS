@@ -1,4 +1,19 @@
 # GWAS
+# 目录
+* [1. 背景](#1-背景)
+    * [1.1 GWAS简介](#11-gwas-简介)
+    * [1.2 Bonferroni 校正](#12-bonferroni-校正)
+    * [1.3 FDR 校正](#13-fdr-校正)
+    * [1.4 GWAS曼哈顿图分析](#14-gwas曼哈顿图分析)
+* [2. 流程](#2-流程)
+    * [2.1 数据下载](#21-数据下载)
+    * [2.2 GWAS 常用文件格式简介](#22-gwas-常用文件格式)
+    * [2.3 数据准备和预处理](#23-数据准备和预处理)
+    * [2.4 群体分层矫正](#24-群体分层校正)
+    * [2.5 关联性分析](#25-关联性分析)
+    * [2.6 可视化](#26-可视化)
+* [3. 参考](#3-参考)
+
 ## 1 背景
 ### 1.1 GWAS 简介
 GWAS全称 Genome-wide association study 全基因组关联分析，即研究表型（关注的性状）和基因型（变异）之间的**关联**，试图找到影响表型的差异的遗传因素
@@ -26,7 +41,7 @@ FDR（False discovery rate）,表示假阳性率
 将每个点的 P 值按照从大到小排序，然后利用公式：P*(n/i) 来计算所对应的 FDR 值；其中 P 是这一次检验的pvalue，n 是检验的次数，i 是排序后的位置 ID（最大的 P 对应的 i 是 n，最小的是 1）；
 如果某一个p值所对应的FDR值大于前一位p值（排序的前一位）所对应的FDR值，则放弃公式计算出来的FDR值，选用与它前一位相同的值。因此会产生连续相同FDR值的现象；反之则保留计算的FDR值。
 
-### 1.3 GWAS曼哈顿图分析
+### 1.4 GWAS曼哈顿图分析
 ![](./Fig/MHD.jpg)
 
 图片来源于文章《1,135 Genomes Reveal the Global Pattern of Polymorphism in *Arabidopsis thaliana*》，分析了SNP 与不同温度下拟南芥（10 与 16℃）开花时间之间的关联，黑色和灰色的点表示 1001 数据库中 SNP 的数据，彩色的点表示 RegMap 数据库中的数据；虚线表示 Bonferroni 校正后的 p 值，点线表示 permutation 校正（相比于 Bonferroni 校正松）后的 p 值。
@@ -35,33 +50,22 @@ FDR（False discovery rate）,表示假阳性率
 
 
 ## 2 流程
++ 与 10 ℃ 下拟南芥开花时间相关的 SNP
 ### 2.1 数据下载
-+ 使用文章[《Genome evolution across 1,011 *Saccharomyces cerevisiae* isolates》](https://doi.org/10.1038/s41586-018-0030-5)中的数据 
++ 使用文章[《1,135 Genomes Reveal the Global Pattern of Polymorphism in *Arabidopsis thaliana*》](https://doi.org/10.1038/s41586-018-0030-5)中的数据 
 
 ```bash
 mkdir data plink PCA association
-cd data
 
-mkdir info pheno ref
-# 基因型文件
-wget http://1002genomes.u-strasbg.fr/files/1011Matrix.gvcf.gz
+cd data
+# 基因型文件(17G)
+wget http://1001genomes.org/data/GMI-MPI/releases/v3.1/1001genomes_snpeff_v3.1/1001genomes_snp-short-indel_only_ACGTN_v3.1.vcf.snpeff.gz
 
 
 # 表型文件
-wget http://1002genomes.u-strasbg.fr/files/phenoMatrix_35ConditionsNormalizedByYPD.tab.gz -P ./pheno
-gzip -d ./pheno/phenoMatrix_35ConditionsNormalizedByYPD.tab.gz
-# 包含了 971 个分离株在 35 中胁迫条件下的生长率（30℃，YPD 培养基）
-
-
-# 分离株信息文件
-wget http://1002genomes.u-strasbg.fr/isolates/page8/files/1002genomes.txt -P info
-# 包含了1011 株分离株的信息（ID、株系名、生态来源、地理来源等）
-
-
-# 用于 GWAS 的矩阵（已经完成过滤），用于参考
-# wget http://1002genomes.u-strasbg.fr/files/1011GWASMatrix.tar.gz -P ref
-# gzip -d ./ref/1011GWASMatrix.tar.gz
-# 包含了 .bed、.bim 和 .fam 三个文件
+mkdir pheno
+http://1001genomes.org/tables/1001genomes-FT10-FT16_and_1001genomes-accessions.html
+# 将文件以 tsv 格式导出，将换行符 CRLF 改为 LF
 ```
 
 ### 2.2 GWAS 常用文件格式
@@ -83,39 +87,22 @@ wget http://1002genomes.u-strasbg.fr/isolates/page8/files/1002genomes.txt -P inf
 ### 2.3 数据准备和预处理
 + 查看菌株信息
 ```bash
-cd info
-sed -i '1013,1042d' 1002genomes.txt # 删除多余信息
-tsv-summarize -H --count -g 4 1002genomes.txt | 
-    mlr --itsv --omd cat # 检查不同分离株的来源
+cd data
+bcftools view -h 1001genomes_snp-short-indel_only_ACGTN_v3.1.vcf.snpeff.gz | 
+    grep -v "##" | datamash transpose | wc -l
+# 1144(1135 株植株)
 
-cat 1002genomes.txt | tail -n+2 | wc -l
-# 1011 株菌株
+# 只关注在 10 ℃ 下的开花时间
+cd pheno
+tsv-select -H --fields id,FT10_mean '1001genomes-FT10-FT16_and_1001genomes- accessions - FT10_FT16_accessions.tsv' > FT10.tsv
+
+tsv-filter -H --str-ne 2:NA FT10.tsv > tem&&
+    mv tem FT10.tsv
+
+sed '1d' FT10.tsv | cut -f 1 > ../filter.lst
+cat ../filter.lst | wc -l
+# 1003 株植株有表型信息
 ```
-| Ecological origins | count |
-| --- | --- |
-| Wine | 248 |
-| Beer | 59 |
-| Sake | 47 |
-| Unknown | 28 |
-| Distillery | 29 |
-| Bakery | 37 |
-| Human, clinical | 107 |
-| Soil | 38 |
-| Industrial | 30 |
-| Fruit | 47 |
-| Nature | 52 |
-| Water | 19 |
-| Dairy | 27 |
-| Tree | 64 |
-| Fermentation | 36 |
-| Cider | 17 |
-| Palm wine | 30 |
-| Human | 31 |
-| Insect | 20 |
-| Flower | 14 |
-| Probiotic | 2 |
-| Bioethanol | 27 |
-| Lab strain | 2 |
 
 + 数据质量控制
 
@@ -125,19 +112,24 @@ cat 1002genomes.txt | tail -n+2 | wc -l
 cd data
 # 筛选出其中的 SNP 位点
 brew install bcftools
-bcftools index --threads 4 1011Matrix.gvcf.gz
-bcftools view -v snps 1011Matrix.gvcf.gz > snp.gvcf 
+
+tabix -fp vcf 1001genomes_snp-short-indel_only_ACGTN_v3.1.vcf.snpeff.gz
+bcftools view -v snps 1001genomes_snp-short-indel_only_ACGTN_v3.1.vcf.snpeff.gz > snp.vcf 
 bcftools view -h snp.gvcf 
 # 最后一行为表头
 # CHROM 为染色体的位置、POS 为变异在染色体上的位置、REF 为参考的等位基因、ALT 为突变后的等位基因（多个用逗号分隔）、ID 为遗传变异的 ID（没有就用 .）、QUAL 为变异的质量，代表位点纯合的概率，此值越大则概率越低、FILTER 为次位点是否要被过滤掉、INFO 是变异的相关信息，在表头中有介绍、FORMAT 为表格中变异的格式，同样在表头中有注释，后面的每一列为样本信息
 
-# 观察一下gvcf文件的格式
-cat snp.gvcf | grep -v "#" | head -n 1 | cut -f 1,2,3,4,5,6,7,8,9,10,11
-# chromosome1     63      .       T       C       223.1   .       AC=4;AF=0.071;AN=56;DP=5226;FS=0;GQ_MEAN=6.82;GQ_STDDEV=19.33;InbreedingCoeff=0.0885;MLEAC=7;MLEAF=0.125;MQ=29.24;MQ0=0;NCC=965;QD=30.63;SOR=0.148      GT:AD:DP:GQ:PGT:PID:PL ./.:0,0:0:.:.:.:.        ./.:0,0:0:.:.:.:.
+# 观察一下vcf文件的格式
+head -n 18 snp.vcf | grep -v "#" | cut -f 1,2,3,4,5,6,7,8,9,10,11
+# 1       55      .       C       T       40      PASS    DP=6720 GT:GQ:DP        ./.:.:. 0|0:36:4
+# 1       56      .       T       A       40      PASS    DP=6785 GT:GQ:DP        ./.:.:. ./.:.:.
 
-# 筛选出双等位基因位点（biallelic position）
-bcftools view -m2 -M2 snp.gvcf > tem&&
-    mv tem snp.gvcf
+# cat snp.vcf | grep -v "#" | wc -l
+# 11,729,362
+
+# 筛选出双等位基因位点（biallelic position）以及有表型的菌株
+bcftools view -m2 -M2 -S filter.lst snp.vcf > tem&&
+    mv tem snp.vcf
 ```
 
 + 使用 Plink 继续进行质控制和后续的分析
@@ -193,7 +185,7 @@ cat SELECT.map | perl -a -F"\t" -ne'
 
 + 对样本进行质量控制
 ```bash
-# 样本数据缺失率大于5%去除
+# 样本数据缺失率大于 5% 去除
 mkdir sample_qc
 plink2 --file SELECT --mind 0.03 --make-bed --out ./sample_qc/sample_qc --allow-extra-chr
 # 1544489 variants and 989 people pass filters and QC.
@@ -241,7 +233,7 @@ plink2 --bfile ./sample_qc/sample_qc --geno 0.005 --maf 0.05 --make-bed --out ./
 
 
 
-## 2.4 群体分层校正
+## 2.4 群体分层校正(optinal)
 + 原因
 GWAS研究时经常碰到群体分层的现象，即该群体的祖先来源多样性，我们知道的，不同群体SNP频率不一样，导致后面做关联分析的时候可能出现假阳性位点（不一定是显著信号位点与该表型有关，可能是与群体 SNP 频率差异有关），因此我们需要在关联分析前对该群体做PCA分析，随后将PCA结果作为协变量加入关联分析中。
 
@@ -293,12 +285,9 @@ cat eigenvaltw.out | mlr --itsv --omd cat
 # 构建表型文件
 cd data/pheno
 
-sed '1d' phenoMatrix_35ConditionsNormalizedByYPD.tab | grep -w -f <(cut -d " " -f 1 ../../plink/SNP_qc/SNP_qc.fam) | perl -a -F"\t" -n -e'
+sed '1d' FT10.tsv | perl -a -F"\t" -n -e'
     print "@F[0]\t$_";
 ' > pheno.txt
-
-wc -l pheno.txt
-# 971个菌株有表型
 
 # 关联分析
 cd association
