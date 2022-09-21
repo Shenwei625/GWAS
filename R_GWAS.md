@@ -38,12 +38,25 @@ Residual Deviance: 1.115 	AIC: 267.3
 # Null Deviance：无效偏差，是指仅包括截距项、不包括解释变量的模型和饱和模型比较得到的偏差统计量的值
 # Residual Deviance：残差，是指既包括截距项，又包括解释变量的模型和饱和模型比较得到的偏差统计量的值
 # AIC值：Akaike information criterion，是衡量统计模型拟合优良性的一种标准，AIC越小，模型越好
+
+summary(glm_result)$coefficients
+
+                  Estimate  Std. Error    t value    Pr(>|t|)
+(Intercept)   0.1518218665 0.003813069 39.8161864    1.442509e-149 
+chr1_10000545 0.0001042195 0.000224933  0.4633359    6.433476e-01
+
+# ESTIMATE：回归系数估计值
+# Std. Error：标准误，样本平均数的标准差
+# t value：
+# Pr(>|t|)：
 ```
 
 
 ## 2 数据预处理和导入
 
 + 使用 210217.SuppDataSet2.DiploidUnitNumberCalls.tsv 表型文件 Rexp.tsv
+
++ 测试
 ```bash
 # 将缺失值改为 NA
 sed -i 's/\t\t/\tNA\t/g' 210217.SuppDataSet2.DiploidUnitNumberCalls.tsv
@@ -59,13 +72,67 @@ sed -i 's/^\t/SAMPLE\t/' Rexp.tsv
 
 tsv-join -H --filter-file Rexp.tsv --key-fields SAMPLE --append-fields AT1G10920 <(tsv-select -H --fields SAMPLE,chr1_10000545 210217.SuppDataSet2.DiploidUnitNumberCalls.tsv) > test.tsv
 ```
-
 ```R
-# 用法：glm(Y ~ X1 + X2 + X3,family = poisson(link = "log"), data = data, na.action=na.omit)
+# 用法：lm(Y ~ X1 + X2 + X3, data = data, na.action=na.omit)
 
 FILE <- "test.tsv"
 DATA <- read.table(FILE, header = TRUE, sep = "\t")
 
+model <- lm(formula = AT1G10920 ~ chr1_10000545,data = DATA, na.action = na.omit)
 
+write.table(coef(summary(model))[,4],file = "test.tsv", sep = "\t"
 ```
 
+
++ 循环
+```bash
+head -n 1 Rexp.tsv | datamash transpose | sed '1d' | wc -l
+# 86
+head -n 1 210217.SuppDataSet2.DiploidUnitNumberCalls.tsv | datamash transpose | sed '1d' | wc -l
+# 21012(21011 STR)
+
+RGENE=$(head -n 1 Rexp.tsv | datamash transpose | sed '1d')
+STR=$(head -n 1 210217.SuppDataSet2.DiploidUnitNumberCalls.tsv | datamash transpose | sed '1d')
+
+for i in $RGENE;do
+  echo "=====>$i"
+  echo -e "STR\t$i" >> $i.tsv
+  for j in $STR;do
+    tsv-join -H --filter-file Rexp.tsv --key-fields SAMPLE --append-fields $i <(tsv-select -H --fields SAMPLE,$j 210217.SuppDataSet2.DiploidUnitNumberCalls.tsv) > $i.$j.tsv
+
+    Rscript -e '
+      FILE <- list.files(path = ".", pattern = "chr")
+      DATA <- read.table(FILE, header = TRUE, sep = "\t")
+      model <- lm(formula = DATA[,3] ~ DATA[,2],data = DATA, na.action = na.omit)
+      write.table(coef(summary(model))[,4],file = "temporary.tsv", sep = "\t")
+    '
+    sed -i '1,2d' temporary.tsv
+    sed -i 's/"//g' temporary.tsv
+    sed -i "s/DATA\[, 2\]/$j/" temporary.tsv
+    cat temporary.tsv >> $i.tsv
+    rm $i.$j.tsv
+  done
+done
+```
+
++ 并行
+```bash
+for i in $RGENE;do
+echo "=====>$i"
+echo -e "STR\t$i" >> $i.tsv
+parallel --linebuffer -k -j 4 "
+  
+  tsv-join -H --filter-file Rexp.tsv --key-fields SAMPLE --append-fields $i <(tsv-select -H --fields SAMPLE,{1} 210217.SuppDataSet2.DiploidUnitNumberCalls.tsv) > $i.{1}.tsv
+
+  Rscript lm.r $i.{1}.tsv
+  rm $i.{1}.tsv
+
+  sed -i '1,2d' $i.{1}.tsv.lst
+  sed -i 's/DATA\[, 2\]/{1}/' $i.{1}.tsv.lst
+  
+  cat $i.{1}.tsv.lst >> $i.tsv
+  rm $i.{1}.tsv.lst
+
+" ::: $(head -n 1 210217.SuppDataSet2.DiploidUnitNumberCalls.tsv | datamash transpose | sed '1d')
+done
+```
