@@ -9,7 +9,7 @@
     * [2.1 数据下载](#21-数据下载)
     * [2.2 GWAS 常用文件格式简介](#22-gwas-常用文件格式)
     * [2.3 数据准备和预处理](#23-数据准备和预处理)
-    * [2.4 群体分层矫正](#24-群体分层校正)
+    * [2.4 群体分层矫正 optional](#24-群体分层校正)
     * [2.5 关联性分析](#25-关联性分析)
     * [2.6 可视化](#26-可视化)
 * [3. 参考](#3-参考)
@@ -124,9 +124,6 @@ head -n 18 snp.vcf | grep -v "#" | cut -f 1,2,3,4,5,6,7,8,9,10,11
 # 1       55      .       C       T       40      PASS    DP=6720 GT:GQ:DP        ./.:.:. 0|0:36:4
 # 1       56      .       T       A       40      PASS    DP=6785 GT:GQ:DP        ./.:.:. ./.:.:.
 
-# cat snp.vcf | grep -v "#" | wc -l
-# 11,729,362
-
 # 筛选出双等位基因位点（biallelic position）以及有表型的菌株
 bcftools view -m2 -M2 -S filter.lst snp.vcf > tem&&
     mv tem snp.vcf
@@ -137,11 +134,12 @@ bcftools view -m2 -M2 -S filter.lst snp.vcf > tem&&
 brew install plink2
 
 cd plink
-plink2 --vcf ../data/snp.gvcf --recode --out SELECT --double-id --allow-extra-chr
+plink2 --vcf ../data/snp.vcf --recode --out SELECT --double-id --threads 2
+# 10707430 variants and 1003 people pass filters and QC
 
 # 查看数据缺失情况
 mkdir pre_view
-plink2 --file SELECT --missing --out ./pre_view/pre_view --allow-extra-chr
+plink2 --file SELECT --missing --out ./pre_view/pre_view --threads 2
 # Sample missing data report written to ./pre_view/pre_view.imiss
 # variant-based missing data report written to ./pre_view/pre_view.lmiss
 ```
@@ -163,15 +161,15 @@ plotr hist pre_view/pre_view.imiss -c 6 --xl "SAMPLE_MISSING" --device png -o pr
 # SNP
 sed -i 's/^\s\+//g' pre_view/pre_view.lmiss
 sed -i 's/\s\+/\t/g' pre_view/pre_view.lmiss
-plotr hist pre_view/pre_view.lmiss -c 5 --xmm 0,0.01 --ymm 0,2e+5 --xl "SNP_MISSING" --device png -o pre_view/SNP.png
+plotr hist pre_view/pre_view.lmiss -c 5 --xmm 0,0.25 --xl "SNP_MISSING" --device png -o pre_view/SNP.png
 ```
 ![](./Fig/sample.png)
 
-0.03为分界
+0.15为分界
 
 ![](./Fig/SNP.png)
 
-0.005为分界
+0.025为分界
 
 + 对 SNP 命名，方便后续查找显著的点
 ```bash
@@ -187,36 +185,16 @@ cat SELECT.map | perl -a -F"\t" -ne'
 ```bash
 # 样本数据缺失率大于 5% 去除
 mkdir sample_qc
-plink2 --file SELECT --mind 0.03 --make-bed --out ./sample_qc/sample_qc --allow-extra-chr
-# 1544489 variants and 989 people pass filters and QC.
-
-# 对样本的杂合率进行控制
-mkdir sample_het
-plink2 --bfile ./sample_qc/sample_qc --het --make-bed --out ./sample_het/sample_het --allow-extra-chr
-# --het: 1524403 variants scanned, report written to ./sample_het/sample_het.het
-# O(HOM)	Observed number of homozygotes
-# E(HOM)	Expected number of homozygotes 
-# N(NM) Number of non-missing autosomal genotypes 
-# 杂合度 = (N-O)/N
-
-# 计算杂合度
-sed -i 's/^\s\+//g' ./sample_het/sample_het.het
-sed -i 's/\s\+/\t/g' ./sample_het/sample_het.het
-
-sed '1d' ./sample_het/sample_het.het | perl -a -F"\t" -ne'
-    chomp($_);
-    $HET = ( @F[4] - @F[2] ) / @F[4];
-    print "$_\t$HET\n";
-' > ./sample_het/Heterozygosity.tsv
-# 杂合度都比较低
+plink2 --file SELECT --mind 0.15 --make-bed --out ./sample_qc/sample_qc
+# 10707430 variants and 407 people pass filters and QC.
 ```
 
 + 对 SNP 位点进行质量控制
 ```bash
 # MAF、缺失率
 mkdir SNP_qc
-plink2 --bfile ./sample_qc/sample_qc --geno 0.005 --maf 0.05 --make-bed --out ./SNP_qc/SNP_qc --allow-extra-chr
-# 85227 variants and 989 people pass filters and QC.
+plink2 --bfile ./sample_qc/sample_qc --geno 0.05 --maf 0.03 --make-bed --out ./SNP_qc/SNP_qc 
+# 378056 variants and 407 people pass filters and QC.
 ```
 
 > 1. 为什么对MAF进行过滤
@@ -239,7 +217,7 @@ GWAS研究时经常碰到群体分层的现象，即该群体的祖先来源多�
 
 ```bash
 cd PCA
-plink2 --bfile ../plink/SNP_qc/SNP_qc --pca 10 --out SNP_qc_pca --allow-extra-chr
+plink2 --bfile ../plink/SNP_qc/SNP_qc --pca 10 --out SNP_qc_pca
 # --pca 后面的数字表示选取了几个关注的主成分，具体后续关联分析中要选多少个，还要看哪些主成分有显著的统计学意义
 ```
 
@@ -259,18 +237,18 @@ cat eigenvaltw.out | mlr --itsv --omd cat
 ```
 |   #N    eigenvalue  difference    twstat      p-value effect. n |
 | --- |
-|    1    554.908000          NA     0.090     0.152332     5.289 |
-|    2    147.262000 -407.646000        NA           NA        NA |
-|    3     85.186900  -62.075100        NA           NA        NA |
-|    4     57.778100  -27.408800        NA           NA        NA |
-|    5     39.611400  -18.166700        NA           NA        NA |
-|    6     38.321900   -1.289500        NA           NA        NA |
-|    7     30.709800   -7.612100        NA           NA        NA |
-|    8     26.640000   -4.069800        NA           NA        NA |
-|    9     24.994700   -1.645300        NA           NA        NA |
-|   10     23.543500   -1.451200        NA           NA        NA |
+|    1     57.378600          NA    -1.467     0.563224    49.271 |
+|    2     55.965700   -1.412900        NA           NA        NA |
+|    3     46.365800   -9.599900        NA           NA        NA |
+|    4     31.312300  -15.053500        NA           NA        NA |
+|    5     25.414400   -5.897900        NA           NA        NA |
+|    6     24.690100   -0.724300        NA           NA        NA |
+|    7     20.789900   -3.900200        NA           NA        NA |
+|    8     17.804700   -2.985200        NA           NA        NA |
+|    9     16.664400   -1.140300        NA           NA        NA |
+|   10     15.095000   -1.569400        NA           NA        NA |
 
-测试所得到的10各主成分都没有显著性？
+测试所得到的10各主成分都没有显著性
 
 ## 2.5 关联性分析
 ```bash
@@ -292,7 +270,7 @@ sed '1d' FT10.tsv | perl -a -F"\t" -n -e'
 # 关联分析
 cd association
 
-plink2 -bfile ../plink/SNP_qc/SNP_qc --linear --pheno ../data/pheno/pheno.txt --mpheno 1 --adjust --allow-extra-chr -noweb --allow-no-sex --out mydata
+plink2 -bfile ../plink/SNP_qc/SNP_qc --linear --pheno ../data/pheno/pheno.txt --mpheno 1 --adjust -noweb --allow-no-sex --out mydata
 
 # 结果存放在 mydata.assoc.linear 文件中,mydata.assoc.linear.adjusted 中存放了校正的p值
 ```
@@ -314,16 +292,10 @@ plink2 -bfile ../plink/SNP_qc/SNP_qc --linear --pheno ../data/pheno/pheno.txt --
 ### 2.6.1 曼哈顿图
 
 ```bash
-sed -i 's/^chromosome//' mydata.assoc.linear
-# 删除前缀方便后续分析
-
 for i in mydata.assoc.linear mydata.assoc.linear.adjusted;do
     sed -i 's/^\s\+//g' $i
     sed -i 's/\s\+/\t/g' $i
 done
-
-tsv-join -H --filter-file mydata.assoc.linear.adjusted --key-fields SNP --append-fields FDR_BH <(tsv-select -H --exclude P mydata.assoc.linear) > RESULT.tsv
-sed -i 's/\tFDR_BH/P/' RESULT.tsv
 ```
 
 ```R
@@ -342,13 +314,7 @@ manhattan(subset(gwasRESULT,CHR == 13),annotatePval = 0.0000001)
 # 只关注 13 号染色体上的突变
 ```
 
-+ 未校正 P 值
-
 ![](./Fig/man.png)
-
-+ FDR_BH 校正后的 P 值
-
-![](./Fig/FDR.png)
 
 
 ## 3 参考
