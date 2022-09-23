@@ -102,7 +102,31 @@ tsv-filter -H --str-ne 2:NA FT10.tsv > tem&&
 sed '1d' FT10.tsv | cut -f 1 > ../filter.lst
 cat ../filter.lst | wc -l
 # 1003 株植株有表型信息
+
+cd group
+# 查看植株分组情况
+tsv-summarize -H --count -g Admixture_Group group.tsv | mlr --itsv --omd cat
+
+# 选取 central_europe 中的植株进行分析
+tsv-filter -H --str-eq Admixture_Group:central_europe group.tsv |
+    sed '1d' | cut -f 1 |
+    grep -w -f ../filter.lst > tem&&
+mv tem ../filter.lst
+# 177株拟南芥
 ```
+| Admixture_Group | count |
+| --- | --- |
+| central_europe | 184 |
+| admixed | 137 |
+| western_europe | 117 |
+| germany | 171 |
+| asia | 79 |
+| relict | 25 |
+| spain | 110 |
+| italy_balkan_caucasus | 92 |
+| south_sweden | 156 |
+| north_sweden | 64 |
+
 
 + 数据质量控制
 
