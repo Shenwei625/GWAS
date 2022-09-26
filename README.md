@@ -9,7 +9,7 @@
     * [2.1 数据下载](#21-数据下载)
     * [2.2 GWAS 常用文件格式简介](#22-gwas-常用文件格式)
     * [2.3 数据准备和预处理](#23-数据准备和预处理)
-    * [2.4 群体分层矫正 optional](#24-群体分层校正)
+    * [2.4 群体分层矫正](#24-群体分层校正)
     * [2.5 关联性分析](#25-关联性分析)
     * [2.6 可视化](#26-可视化)
 * [3. 参考](#3-参考)
@@ -159,7 +159,7 @@ brew install plink2
 
 cd plink
 plink2 --vcf ../data/snp.vcf --recode --out SELECT --double-id --threads 2
-# 10707430 variants and 1003 people pass filters and QC
+# 10707430 variants and 177 people pass filters and QC.
 
 # 查看数据缺失情况
 mkdir pre_view
@@ -209,8 +209,8 @@ cat SELECT.map | perl -a -F"\t" -ne'
 ```bash
 # 样本数据缺失率大于 5% 去除
 mkdir sample_qc
-plink2 --file SELECT --mind 0.15 --make-bed --out ./sample_qc/sample_qc
-# 10707430 variants and 407 people pass filters and QC.
+plink2 --file SELECT --mind 0.2 --make-bed --out ./sample_qc/sample_qc
+# 10707430 variants and 127 people pass filters and QC.
 ```
 
 + 对 SNP 位点进行质量控制
@@ -218,7 +218,7 @@ plink2 --file SELECT --mind 0.15 --make-bed --out ./sample_qc/sample_qc
 # MAF、缺失率
 mkdir SNP_qc
 plink2 --bfile ./sample_qc/sample_qc --geno 0.05 --maf 0.03 --make-bed --out ./SNP_qc/SNP_qc 
-# 378056 variants and 407 people pass filters and QC.
+# 878288 variants and 127 people pass filters and QC.
 ```
 
 > 1. 为什么对MAF进行过滤
@@ -235,7 +235,7 @@ plink2 --bfile ./sample_qc/sample_qc --geno 0.05 --maf 0.03 --make-bed --out ./S
 
 
 
-## 2.4 群体分层校正(optional)
+## 2.4 群体分层校正
 + 原因
 GWAS研究时经常碰到群体分层的现象，即该群体的祖先来源多样性，我们知道的，不同群体SNP频率不一样，导致后面做关联分析的时候可能出现假阳性位点（不一定是显著信号位点与该表型有关，可能是与群体 SNP 频率差异有关），因此我们需要在关联分析前对该群体做PCA分析，随后将PCA结果作为协变量加入关联分析中。
 
@@ -261,18 +261,18 @@ cat eigenvaltw.out | mlr --itsv --omd cat
 ```
 |   #N    eigenvalue  difference    twstat      p-value effect. n |
 | --- |
-|    1     57.378600          NA    -1.467     0.563224    49.271 |
-|    2     55.965700   -1.412900        NA           NA        NA |
-|    3     46.365800   -9.599900        NA           NA        NA |
-|    4     31.312300  -15.053500        NA           NA        NA |
-|    5     25.414400   -5.897900        NA           NA        NA |
-|    6     24.690100   -0.724300        NA           NA        NA |
-|    7     20.789900   -3.900200        NA           NA        NA |
-|    8     17.804700   -2.985200        NA           NA        NA |
-|    9     16.664400   -1.140300        NA           NA        NA |
-|   10     15.095000   -1.569400        NA           NA        NA |
+|    1     18.499400          NA     1.041    0.0458822    39.452 |
+|    2     10.522000   -7.977400        NA           NA        NA |
+|    3      8.729770   -1.792230        NA           NA        NA |
+|    4      8.506330   -0.223440        NA           NA        NA |
+|    5      6.741760   -1.764570        NA           NA        NA |
+|    6      6.393730   -0.348030        NA           NA        NA |
+|    7      5.844950   -0.548780        NA           NA        NA |
+|    8      4.063740   -1.781210        NA           NA        NA |
+|    9      3.698330   -0.365410        NA           NA        NA |
+|   10      3.594240   -0.104090        NA           NA        NA |
 
-测试所得到的10各主成分都没有显著性
+将第一个主成分放入协变量
 
 ## 2.5 关联性分析
 ```bash
@@ -294,7 +294,7 @@ sed '1d' FT10.tsv | perl -a -F"\t" -n -e'
 # 关联分析
 cd association
 
-plink2 -bfile ../plink/SNP_qc/SNP_qc --linear --pheno ../data/pheno/pheno.txt --mpheno 1 --adjust -noweb --allow-no-sex --out mydata
+plink2 -bfile ../plink/SNP_qc/SNP_qc --linear --pheno ../data/pheno/pheno.txt --mpheno 1 --covar ../PCA/SNP_qc_pca.eigenvec --covar-number 1 --adjust -noweb --allow-no-sex --out mydata
 
 # 结果存放在 mydata.assoc.linear 文件中,mydata.assoc.linear.adjusted 中存放了校正的p值
 ```
@@ -316,26 +316,26 @@ plink2 -bfile ../plink/SNP_qc/SNP_qc --linear --pheno ../data/pheno/pheno.txt --
 ### 2.6.1 曼哈顿图
 
 ```bash
-for i in mydata.assoc.linear mydata.assoc.linear.adjusted;do
-    sed -i 's/^\s\+//g' $i
-    sed -i 's/\s\+/\t/g' $i
-done
+sed -i 's/^\s\+//g' mydata.assoc.linear
+sed -i 's/\s\+/\t/g' mydata.assoc.linear
+
+cat mydata.assoc.linear | grep -v "NA" > tem&&
+    mv tem mydata.assoc.linear
+
+tsv-filter -H --str-ne TEST:COV1 mydata.assoc.linear > result.tsv
 ```
 
 ```R
 install.packages("qqman")
 library(qqman)
 
-FILE <- "mydata.assoc.linear"
+FILE <- "result.tsv"
 gwasRESULT <- read.table(FILE, header = TRUE)
 manhattan(gwasRESULT)
 # 默认的 suggestiveline（蓝色） 为 -log10(1e-5),而 genome-wide sigificant（红色） 为 -log10(5e-8)
 
-manhattan(gwasRESULT, annotatePval = 0.0000001)
-# 显示校正后 P 值小于 0.0000001 的点
-
-manhattan(subset(gwasRESULT,CHR == 13),annotatePval = 0.0000001)
-# 只关注 13 号染色体上的突变
+manhattan(gwasRESULT, suggestiveline = FALSE, annotatePval = 1e-9)
+# 显示校正后 P 值小于 1e-9 的点
 ```
 
 ![](./Fig/man.png)
