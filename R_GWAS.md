@@ -10,9 +10,10 @@
 ### 1.2 二项分布
 二项分布即重复n次独立的伯努利试验。在每次试验中只有两种可能的结果，而且两种结果发生与否互相对立，并且相互独立，与其它各次试验结果无关，事件发生与否的概率在每一次独立试验中都保持不变，则这一系列试验总称为n重伯努利实验
 
-+ 二项分布与泊松分布的关系
++ 负二项分布
 
-当二项分布的n很大时，泊松分布可以作为二项分布的近似，常当n≧20,p≦0.05时，就可以用泊松公式近似得计算
+在一系列伯努利试验中，失败次数到达指定次数时，成功次数的离散概率分布。
+这是泊松分布的过度分散版本。当期望值很高时，负二项分布的标准偏差与期望值成比例增加，对数正态分布也是如此。
 
 ### 1.3 伽马分布
 是统计学中的连续概率函数，要等到n个随机事件都发生，需要经历多久时间。
@@ -47,16 +48,21 @@ chr1_10000545 0.0001042195 0.000224933  0.4633359    6.433476e-01
 
 # ESTIMATE：回归系数估计值
 # Std. Error：标准误，样本平均数的标准差
-# t value：
-# Pr(>|t|)：
+# t value：t 检验
+# Pr(>|t|)：t 检验的 p 值
 ```
+
++ lm 与 glm 
+
+lm 简单线性回归；glm 广义线性回归，当 glm 中的因变量分布为正态分布时，且只有一个自变量时，两者结果相等
+
 
 
 ## 2 数据预处理和导入
 
 + 使用 210217.SuppDataSet2.DiploidUnitNumberCalls.tsv 表型文件 Rexp.tsv
 
-+ 测试
++ test
 ```bash
 # 将缺失值改为 NA
 sed -i 's/\t\t/\tNA\t/g' 210217.SuppDataSet2.DiploidUnitNumberCalls.tsv
@@ -91,8 +97,8 @@ head -n 1 Rexp.tsv | datamash transpose | sed '1d' | wc -l
 head -n 1 210217.SuppDataSet2.DiploidUnitNumberCalls.tsv | datamash transpose | sed '1d' | wc -l
 # 21012(21011 STR)
 
-RGENE=$(head -n 1 Rexp.tsv | datamash transpose | sed '1d')
-STR=$(head -n 1 210217.SuppDataSet2.DiploidUnitNumberCalls.tsv | datamash transpose | sed '1d')
+RGENE=$(head -n 1 data/Rexp.tsv | datamash transpose | sed '1d')
+STR=$(head -n 1 data/210217.SuppDataSet2.DiploidUnitNumberCalls.tsv | datamash transpose | sed '1d')
 
 for i in $RGENE;do
   echo "=====>$i"
@@ -115,24 +121,69 @@ for i in $RGENE;do
 done
 ```
 
-+ 并行
++ parallel(lm)
 ```bash
 for i in $RGENE;do
-echo "=====>$i"
-echo -e "STR\t$i" >> $i.tsv
-parallel --linebuffer -k -j 4 "
+  echo "=====>$i"
+  echo -e "STR\t$i" >> $i.tsv
+  parallel --linebuffer -k -j 4 "
   
-  tsv-join -H --filter-file Rexp.tsv --key-fields SAMPLE --append-fields $i <(tsv-select -H --fields SAMPLE,{1} 210217.SuppDataSet2.DiploidUnitNumberCalls.tsv) > $i.{1}.tsv
+    tsv-join -H --filter-file data/Rexp.tsv --key-fields SAMPLE --append-fields $i <(tsv-select -H --fields SAMPLE,{1} data/210217.SuppDataSet2.DiploidUnitNumberCalls.tsv) > $i.{1}.tsv
 
-  Rscript lm.r $i.{1}.tsv
-  rm $i.{1}.tsv
+    Rscript script/lm.r $i.{1}.tsv
+    rm $i.{1}.tsv
 
-  sed -i '1,2d' $i.{1}.tsv.lst
-  sed -i 's/DATA\[, 2\]/{1}/' $i.{1}.tsv.lst
+    sed -i '1,2d' $i.{1}.tsv.lst
+    sed -i 's/DATA\[, 2\]/{1}/' $i.{1}.tsv.lst
   
-  cat $i.{1}.tsv.lst >> $i.tsv
-  rm $i.{1}.tsv.lst
+    cat $i.{1}.tsv.lst >> $i.tsv
+    rm $i.{1}.tsv.lst
 
-" ::: $(head -n 1 210217.SuppDataSet2.DiploidUnitNumberCalls.tsv | datamash transpose | sed '1d')
+  " ::: $(head -n 1 data/210217.SuppDataSet2.DiploidUnitNumberCalls.tsv | datamash transpose | sed '1d')
 done
 ```
+
++ parallel(glm - quasipoisson)
+```bash
+for i in $RGENE;do
+  echo "=====>$i"
+  echo -e "STR\t$i" >> $i.tsv
+  parallel --linebuffer -k -j 4 "
+  
+    tsv-join -H --filter-file data/Rexp.tsv --key-fields SAMPLE --append-fields $i <(tsv-select -H --fields SAMPLE,{1} data/210217.SuppDataSet2.DiploidUnitNumberCalls.tsv) > $i.{1}.tsv
+    tsv-join -H --filter-file data/group/group.tsv --key-fields SAMPLE --append-fields Admixture_Group $i.{1}.tsv > $i.{1}.tem&&
+      mv $i.{1}.tem $i.{1}.tsv
+
+    Rscript script/glm.r $i.{1}.tsv
+    rm $i.{1}.tsv
+
+    sed -i 's/DATA\[, 2\]/{1}/' $i.{1}.tsv.lst
+    sed -i '/^as/'d $i.{1}.tsv.lst
+    sed -i '1,2d' $i.{1}.tsv.lst
+  
+    cat $i.{1}.tsv.lst >> $i.tsv
+    rm $i.{1}.tsv.lst
+
+  " ::: $(head -n 1 data/210217.SuppDataSet2.DiploidUnitNumberCalls.tsv | datamash transpose | sed '1d')
+done
+```
+
++ 可视化（lm_result ==> AT1G10920.tsv）
+```bash
+# 对原文件进行修改
+cat AT1G10920.tsv | perl -a -F"\t" -ne'
+  if (/^STR/) {
+    print "SNP\tCHR\tBP\tP\n";
+  }elsif (/^chr(\d)_(\d+)/) {
+    print "@F[0]\t$1\t$2\t@F[1]";
+  }
+' > AT1G10920_adjust.tsv
+
+Rscript -e'
+  FILE <- "AT1G10920_adjust.tsv"
+  DATA <- read.table(FILE, header = TRUE, sep = "\t")
+  manhattan(DATA, suggestiveline = FALSE, annotatePval = 5e-8, annotateTop = F)
+'
+```
+
+![](./Fig/lm_AT1G10920.png)
