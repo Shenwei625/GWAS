@@ -178,12 +178,27 @@ cat AT1G10920.tsv | perl -a -F"\t" -ne'
     print "@F[0]\t$1\t$2\t@F[1]";
   }
 ' > AT1G10920_adjust.tsv
+rm AT1G10920.tsv
 
 Rscript -e'
   FILE <- "AT1G10920_adjust.tsv"
   DATA <- read.table(FILE, header = TRUE, sep = "\t")
   manhattan(DATA, suggestiveline = FALSE, annotatePval = 5e-8, annotateTop = F)
+  title(main = "AT1G10920")
 '
 ```
-
++ AT1G10920 与 STR 之间的关联（lm）
 ![](./Fig/lm_AT1G10920.png)
+
++ AT1G10920 与 STR 之间的关联（glm ===> quasipoisson）
+![](./Fig/AT1G10920_glm.png)
+
+可以观察到在加入了Admixture_Group这一协变量以后，一些原来显著的点，显著性降低，减少了假阳性的现象
+
++ RFO1 与 STR 之间的关联（已经有文章验证存在关联）
+![](./Fig/AT1G79670_glm.png)
+
+观察到距离 RFO1 最近的一个短串联重复（chr1_29948066）的显著水平很高，在剩余的R基因中并未发现此现象，说明在此模型下，还存在很多假阳性的点
+
+
+
