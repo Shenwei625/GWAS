@@ -9,7 +9,7 @@
     * [2.1 数据下载](#21-数据下载)
     * [2.2 GWAS 常用文件格式简介](#22-gwas-常用文件格式)
     * [2.3 数据准备和预处理](#23-数据准备和预处理)
-    * [2.4 群体分层矫正](#24-群体分层校正)
+    * [2.4 群体分层矫正和亲缘关系分析](#24-群体分层矫正和亲缘关系分析)
     * [2.5 关联性分析](#25-关联性分析)
     * [2.6 可视化](#26-可视化)
 * [3. 参考](#3-参考)
@@ -55,7 +55,7 @@ FDR（False discovery rate）,表示假阳性率
 + 使用文章[《1,135 Genomes Reveal the Global Pattern of Polymorphism in *Arabidopsis thaliana*》](https://doi.org/10.1038/s41586-018-0030-5)中的数据 
 
 ```bash
-mkdir data plink PCA association
+mkdir data plink PCA association relationship
 
 cd data
 # 基因型文件(17G)
@@ -235,7 +235,8 @@ plink2 --bfile ./sample_qc/sample_qc --geno 0.05 --maf 0.03 --make-bed --out ./S
 
 
 
-## 2.4 群体分层校正
+## 2.4 群体分层矫正和亲缘关系分析
+### 2.4.1 群体分层矫正
 + 原因
 GWAS研究时经常碰到群体分层的现象，即该群体的祖先来源多样性，我们知道的，不同群体SNP频率不一样，导致后面做关联分析的时候可能出现假阳性位点（不一定是显著信号位点与该表型有关，可能是与群体 SNP 频率差异有关），因此我们需要在关联分析前对该群体做PCA分析，随后将PCA结果作为协变量加入关联分析中。
 
@@ -274,6 +275,26 @@ cat eigenvaltw.out | mlr --itsv --omd cat
 
 将第一个主成分放入协变量
 
+### 2.4.2 亲缘关系分析
++ 利用gemma计算样本间的遗传距离
+```bash
+cd biosoft
+
+wget https://github.com/genetics-statistics/GEMMA/releases/download/v0.98.5/gemma-0.98.5-linux-static-AMD64.gz
+gunzip gemma-0.98.5-linux-static-AMD64.gz
+chmod +x gemma-0.98.5-linux-static-AMD64
+mv gemma-0.98.5-linux-static-AMD64 gemma
+
+gemma -h
+```
+
+```bash
+cd relationship
+
+# kinship
+gemma -bfile ../plink/SNP_qc/SNP_qc -gk 2 -o kin
+```
+
 ## 2.5 关联性分析
 ```bash
 # 用法：plink2 --bfile mydata --linear --pheno pheno.txt --mpheno 1 --covar covar.txt --covar-number 1,2,3 --out mydata -noweb --allow-extra-chr
@@ -294,9 +315,15 @@ sed '1d' FT10.tsv | perl -a -F"\t" -n -e'
 # 关联分析
 cd association
 
+# plink2
 plink2 -bfile ../plink/SNP_qc/SNP_qc --linear --pheno ../data/pheno/pheno.txt --mpheno 1 --covar ../PCA/SNP_qc_pca.eigenvec --covar-number 1 --adjust -noweb --allow-no-sex --out mydata
 
 # 结果存放在 mydata.assoc.linear 文件中,mydata.assoc.linear.adjusted 中存放了校正的p值
+
+# gemma
+gemma -bfile ../plink/SNP_qc/SNP_qc -k ../relationship/output/kin.sXX.txt -lmm 1 -o gemma
+
+# 结果存放在 gemma.assoc.txt 文件夹
 ```
 >**.adjusted文件**
 >
@@ -314,7 +341,7 @@ plink2 -bfile ../plink/SNP_qc/SNP_qc --linear --pheno ../data/pheno/pheno.txt --
 
 ## 2.6 可视化
 ### 2.6.1 曼哈顿图
-
++ plink 部分
 ```bash
 sed -i 's/^\s\+//g' mydata.assoc.linear
 sed -i 's/\s\+/\t/g' mydata.assoc.linear
@@ -322,7 +349,15 @@ sed -i 's/\s\+/\t/g' mydata.assoc.linear
 cat mydata.assoc.linear | grep -v "NA" > tem&&
     mv tem mydata.assoc.linear
 
-tsv-filter -H --str-ne TEST:COV1 mydata.assoc.linear > result.tsv
+tsv-filter -H --str-eq TEST:ADD mydata.assoc.linear > result.tsv
+```
+
++ gemma 部分
+```bash
+tsv-select -H --fields rs,chr,ps,p_wald gemma.assoc.txt > result.tsv
+sed -i '1d' result.tsv
+(echo -e "SNP\tCHR\tBP\tP" && cat result.tsv) >tem&&
+    mv tem result.tsv
 ```
 
 ```R
@@ -334,12 +369,20 @@ gwasRESULT <- read.table(FILE, header = TRUE)
 manhattan(gwasRESULT)
 # 默认的 suggestiveline（蓝色） 为 -log10(1e-5),而 genome-wide sigificant（红色） 为 -log10(5e-8)
 
-manhattan(gwasRESULT, suggestiveline = FALSE, annotatePval = 1e-9)
+manhattan(gwasRESULT, suggestiveline = FALSE, annotatePval = 1e-8)
 # 显示校正后 P 值小于 1e-9 的点
 ```
++ plink result
 
 ![](./Fig/man.png)
 
+可能存在假阳性现象
+
++ gemma result
+
+![](./Fig/gemma.png)
+
+可能是由于只选择了两个 Admixture 分组中的样本，样本有点少，所以没有显著的点
 
 ## 3 参考
 [1. GWAS 分析](https://zhuanlan.zhihu.com/p/158869408)
@@ -357,3 +400,5 @@ manhattan(gwasRESULT, suggestiveline = FALSE, annotatePval = 1e-9)
 [7. 全基因组关联分析学习资料](https://www.jianshu.com/p/cf1a3fabd96a)
 
 [8. 笔记 | GWAS 操作流程3：Plink 关联分析](http://www.360doc.com/content/21/1118/13/77772224_1004706906.shtml)
+
+[9. 关联分析-GEMMA笔记](https://www.jianshu.com/p/82824fa49c87)
