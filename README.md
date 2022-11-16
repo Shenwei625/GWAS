@@ -9,7 +9,7 @@
     * [2.1 数据下载](#21-数据下载)
     * [2.2 GWAS 常用文件格式简介](#22-gwas-常用文件格式)
     * [2.3 数据准备和预处理](#23-数据准备和预处理)
-    * [2.4 群体分层矫正和亲缘关系分析](#24-群体分层矫正和亲缘关系分析)
+    * [2.4 亲缘关系分析](#24-亲缘关系分析)
     * [2.5 关联性分析](#25-关联性分析)
     * [2.6 可视化](#26-可视化)
 * [3. 参考](#3-参考)
@@ -52,20 +52,25 @@ FDR（False discovery rate）,表示假阳性率
 ## 2 流程
 + 与 10 ℃ 下拟南芥开花时间相关的 SNP
 ### 2.1 数据下载
-+ 使用文章[《1,135 Genomes Reveal the Global Pattern of Polymorphism in *Arabidopsis thaliana*》](https://doi.org/10.1038/s41586-018-0030-5)中的数据 
++ 使用文章[《A new regulator of seed size control in *Arabidopsis* identified by a genome-wide association study》](https://nph.onlinelibrary.wiley.com/doi/10.1111/nph.15642)中的数据 
 
 ```bash
-mkdir data plink PCA association relationship
+mkdir -p data/pheno plink biosoft
 
 cd data
-# 基因型文件(17G)
-wget http://1001genomes.org/data/GMI-MPI/releases/v3.1/1001genomes_snpeff_v3.1/1001genomes_snp-short-indel_only_ACGTN_v3.1.vcf.snpeff.gz
+# 基因型文件
+wget http://1001genomes.org/data/GMI-MPI/releases/v3.1/1001genomes_snp-short-indel_only_ACGTN.vcf.gz
 
+cd biosoft
+# gemma
+wget https://github.com/genetics-statistics/GEMMA/releases/download/v0.98.5/gemma-0.98.5-linux-static-AMD64.gz
+gunzip gemma-0.98.1-linux-static.gz
+chmod +x gemma-0.98.5-linux-static-AMD64
+mv gemma-0.98.5-linux-static-AMD64 gemma
+./gemma
 
-# 表型文件
-mkdir pheno
-http://1001genomes.org/tables/1001genomes-FT10-FT16_and_1001genomes-accessions.html
-# 将文件以 tsv 格式导出，将换行符 CRLF 改为 LF
+# Beagle
+wget https://faculty.washington.edu/browning/beagle/beagle.22Jul22.46e.jar
 ```
 
 ### 2.2 GWAS 常用文件格式
@@ -85,140 +90,88 @@ http://1001genomes.org/tables/1001genomes-FT10-FT16_and_1001genomes-accessions.h
 
 
 ### 2.3 数据准备和预处理
-+ 查看菌株信息
++ 查看信息
 ```bash
-cd data
-bcftools view -h 1001genomes_snp-short-indel_only_ACGTN_v3.1.vcf.snpeff.gz | 
-    grep -v "##" | datamash transpose | wc -l
-# 1144(1135 株植株)
+# 样本信息
+cut -f 2 data/pheno/seed_size.tsv | 
+    sed '1d' | 
+    grep -v "-" > data/pheno/sample.lst
 
-# 只关注在 10 ℃ 下的开花时间
-cd pheno
-tsv-select -H --fields id,FT10_mean '1001genomes-FT10-FT16_and_1001genomes- accessions - FT10_FT16_accessions.tsv' > FT10.tsv
-
-tsv-filter -H --str-ne 2:NA FT10.tsv > tem&&
-    mv tem FT10.tsv
-
-sed '1d' FT10.tsv | cut -f 1 > ../filter.lst
-cat ../filter.lst | wc -l
-# 1003 株植株有表型信息
-
-cd group
-# 查看植株分组情况
-tsv-summarize -H --count -g Admixture_Group group.tsv | mlr --itsv --omd cat
-
-# 选取 central_europe 中的植株进行分析
-tsv-filter -H --str-eq Admixture_Group:central_europe group.tsv |
-    sed '1d' | cut -f 1 |
-    grep -w -f ../filter.lst > tem&&
-mv tem ../filter.lst
-# 177株拟南芥
-```
-| Admixture_Group | count |
-| --- | --- |
-| central_europe | 184 |
-| admixed | 137 |
-| western_europe | 117 |
-| germany | 171 |
-| asia | 79 |
-| relict | 25 |
-| spain | 110 |
-| italy_balkan_caucasus | 92 |
-| south_sweden | 156 |
-| north_sweden | 64 |
-
-
-+ 数据质量控制
-
-质控一般包含两个方向：[一个是样本的质量控制（缺失率 < 5%;杂合性等）；另一个是 SNP 位点的质量控制（MAF > 5%; 哈温平衡检验等）](https://zhuanlan.zhihu.com/p/149947873?from_voters_page=true)
-
-```bash
-cd data
-# 筛选出其中的 SNP 位点
+# 提取样本 SNP 位点
 brew install bcftools
 
-tabix -fp vcf 1001genomes_snp-short-indel_only_ACGTN_v3.1.vcf.snpeff.gz
-bcftools view -v snps 1001genomes_snp-short-indel_only_ACGTN_v3.1.vcf.snpeff.gz > snp.vcf 
+tabix -fp vcf data/1001genomes_snp-short-indel_only_ACGTN.vcf.gz
+bcftools view -v snps data/1001genomes_snp-short-indel_only_ACGTN.vcf.gz > data/snp.vcf 
 bcftools view -h snp.gvcf 
 # 最后一行为表头
 # CHROM 为染色体的位置、POS 为变异在染色体上的位置、REF 为参考的等位基因、ALT 为突变后的等位基因（多个用逗号分隔）、ID 为遗传变异的 ID（没有就用 .）、QUAL 为变异的质量，代表位点纯合的概率，此值越大则概率越低、FILTER 为次位点是否要被过滤掉、INFO 是变异的相关信息，在表头中有介绍、FORMAT 为表格中变异的格式，同样在表头中有注释，后面的每一列为样本信息
 
-# 观察一下vcf文件的格式
-head -n 18 snp.vcf | grep -v "#" | cut -f 1,2,3,4,5,6,7,8,9,10,11
-# 1       55      .       C       T       40      PASS    DP=6720 GT:GQ:DP        ./.:.:. 0|0:36:4
-# 1       56      .       T       A       40      PASS    DP=6785 GT:GQ:DP        ./.:.:. ./.:.:.
-
 # 筛选出双等位基因位点（biallelic position）以及有表型的菌株
-bcftools view -m2 -M2 -S filter.lst snp.vcf > tem&&
-    mv tem snp.vcf
+bcftools view -m2 -M2 -S data/pheno/sample.lst data/snp.vcf > data/tem&&
+    mv data/tem data/snp.vcf
 ```
+上述过程差不多 3-4 小时
+
++ 基因型填补
+
+基于观察对象已有的基因型，对缺失的基因型进行填补。基于SNO之间连锁不平衡的原理（某个物种的基因序列可以认为是由很多的单倍体型构成），在进行基因型填补时，首先利用高密度的参照数据获得单倍体型信息，再根据样本观察到的基因型推测该样本最有可能携带的单倍体型。
+```bash
+# 查看基因型频率
+vcftools --vcf data/snp.vcf --freq --out data/freq
+
+head freq.frq
+#CHROM   POS     N_ALLELES       N_CHR   {ALLELE:FREQ}
+#1       55      2       158     C:1     T:0
+#1       56      2       166     T:1     A:0
+#1       63      2       138     T:0.971014      C:0.0289855
+#1       73      2       146     C:0.945205      A:0.0547945
+#1       75      2       144     T:1     A:0
+#1       80      2       144     G:0.986111      T:0.0138889
+#1       88      2       144     A:0.972222      T:0.0277778
+#1       92      2       156     A:0.576923      C:0.423077
+#1       94      2       164     C:0.987805      T:0.0121951
+
+java -Xms8G -Xmx8G -jar \
+biosoft/beagle.22Jul22.46e.jar nthreads=2 \
+gt=data/snp.vcf out=data/snp_imputation ne=172
+# 其初始空间(即-Xms),最大空间(-Xmx)
+```
+填补过程约4小时
 
 + 使用 Plink 继续进行质控制和后续的分析
 ```bash
 brew install plink2
-
-cd plink
-plink2 --vcf ../data/snp.vcf --recode --out SELECT --double-id --threads 2
-# 10707430 variants and 177 people pass filters and QC.
-
-# 查看数据缺失情况
-mkdir pre_view
-plink2 --file SELECT --missing --out ./pre_view/pre_view --threads 2
-# Sample missing data report written to ./pre_view/pre_view.imiss
-# variant-based missing data report written to ./pre_view/pre_view.lmiss
+plink2 --vcf data/snp_imputation.vcf.gz --recode --out plink/SELECT --double-id --threads 4
+#10707430 variants and 172 people pass filters and QC.
 ```
->**个体缺失位点统计预览**
->
->第一列为家系ID，第二列为个体ID，第三列是否表型缺失，第四列缺失的SNP个数，第五列总SNP个数，第六列缺失率
->
->**SNP缺失的个体数文件预览**
->
->第一列为染色体，第二列为SNP名称，第三列为缺失个数，第四列为总个数，第五列为缺失率
-
-+ 可视化
-```bash
-# Sample
-sed -i 's/^\s\+//g' pre_view/pre_view.imiss
-sed -i 's/\s\+/\t/g' pre_view/pre_view.imiss
-plotr hist pre_view/pre_view.imiss -c 6 --xl "SAMPLE_MISSING" --device png -o pre_view/sample.png
-
-# SNP
-sed -i 's/^\s\+//g' pre_view/pre_view.lmiss
-sed -i 's/\s\+/\t/g' pre_view/pre_view.lmiss
-plotr hist pre_view/pre_view.lmiss -c 5 --xmm 0,0.25 --xl "SNP_MISSING" --device png -o pre_view/SNP.png
-```
-![](./Fig/sample.png)
-
-0.15为分界
-
-![](./Fig/SNP.png)
-
-0.025为分界
 
 + 对 SNP 命名，方便后续查找显著的点
 ```bash
 # 修改 SELECT.map 文件的第二列
-cat SELECT.map | perl -a -F"\t" -ne'
+cat plink/SELECT.map | perl -a -F"\t" -ne'
     $n = $n + 1;
     print "@F[0]\tSNP$n\t@F[2]\t@F[3]";
 ' > tem&&
-    mv tem SELECT.map
+    mv tem plink/SELECT.map
 ```
 
-+ 对样本进行质量控制
++ 对 MAF 进行筛选
 ```bash
-# 样本数据缺失率大于 5% 去除
-mkdir sample_qc
-plink2 --file SELECT --mind 0.2 --make-bed --out ./sample_qc/sample_qc
-# 10707430 variants and 127 people pass filters and QC.
+# MAF
+mkdir -p plink/SNP_qc
+plink2 --file plink/SELECT --maf 0.05 --make-bed --out plink/SNP_qc/SNP_qc
+#1782903 variants and 172 people pass filters and QC.
 ```
 
-+ 对 SNP 位点进行质量控制
++ 基于连锁不平衡进行过滤
 ```bash
-# MAF、缺失率
-mkdir SNP_qc
-plink2 --bfile ./sample_qc/sample_qc --geno 0.05 --maf 0.03 --make-bed --out ./SNP_qc/SNP_qc 
-# 878288 variants and 127 people pass filters and QC.
+mkdir -p plink/LD_filter
+plink2 --bfile plink/SNP_qc/SNP_qc --indep 50 5 2 --out plink/LD_filter/LD_filter
+# Marker lists written to plink/LD_filter/LD_filter.prune.in and plink/LD_filter/LD_filter.prune.out .
+
+wc -l plink/LD_filter/LD_filter.prune.in
+# 275087
+plink2 --bfile plink/SNP_qc/SNP_qc --extract plink/LD_filter/LD_filter.prune.in --make-bed --out plink/SNP_LD 
 ```
 
 > 1. 为什么对MAF进行过滤
@@ -231,158 +184,59 @@ plink2 --bfile ./sample_qc/sample_qc --geno 0.05 --maf 0.03 --make-bed --out ./S
 >
 >3. 哈温（Haed-Weinberg）平衡检验
 >
->在理想状态（种群足够大、种群个体间随机交配、没有突变、没有选择、没有迁移、没有遗传漂变）下，各等位基因的频率在遗传中是稳定不变的。为什么要去除不符合的位点？这边是否需要进行检验？
+> 在理想状态（种群足够大、种群个体间随机交配、没有突变、没有选择、没有迁移、没有遗传漂变）下，各等位基因的频率在遗传中是稳定不变的。为什么要去除不符合的位点？这边是否需要进行检验？
 
 
-
-## 2.4 群体分层矫正和亲缘关系分析
-### 2.4.1 群体分层矫正
-+ 原因
-GWAS研究时经常碰到群体分层的现象，即该群体的祖先来源多样性，我们知道的，不同群体SNP频率不一样，导致后面做关联分析的时候可能出现假阳性位点（不一定是显著信号位点与该表型有关，可能是与群体 SNP 频率差异有关），因此我们需要在关联分析前对该群体做PCA分析，随后将PCA结果作为协变量加入关联分析中。
-
+### 2.4 亲缘关系分析
 ```bash
-cd PCA
-plink2 --bfile ../plink/SNP_qc/SNP_qc --pca 10 --out SNP_qc_pca
-# --pca 后面的数字表示选取了几个关注的主成分，具体后续关联分析中要选多少个，还要看哪些主成分有显著的统计学意义
-```
+#fam文件第6列为-9，使用GEMMA前需要将第6列替换为对应要分析的表型
+sed -i 's/\s/\t/g' plink/SNP_LD.fam
+tsv-select --fields 1,2,3,4,5 plink/SNP_LD.fam > tem&&
+    mv tem plink/SNP_LD.fam
 
-+ 利用 twstats 计算显著的主成分
-```bash
-# 软件下载
-wget https://data.broadinstitute.org/alkesgroup/EIGENSOFT/EIG-6.1.4.tar.gz
-tar xzvf EIG-6.1.4.tar.gz
+tsv-select -H --fields easyGWAS_ID,Seed_size data/pheno/seed_size.tsv | sed '1d' | grep -v "-" > merge.tsv
+tsv-join --filter-file merge.tsv --key-fields 1 --append-fields 2 plink/SNP_LD.fam > tem&&
+    mv tem plink/SNP_LD.fam
+rm merge.tsv
 
-cd EIG-6.1.4/bin
-export PATH="$(pwd):$PATH"
-
-# 计算显著性
-cd PCA
-twstats -t twtable -i SNP_qc_pca.eigenval -o eigenvaltw.out
-cat eigenvaltw.out | mlr --itsv --omd cat
-```
-|   #N    eigenvalue  difference    twstat      p-value effect. n |
-| --- |
-|    1     18.499400          NA     1.041    0.0458822    39.452 |
-|    2     10.522000   -7.977400        NA           NA        NA |
-|    3      8.729770   -1.792230        NA           NA        NA |
-|    4      8.506330   -0.223440        NA           NA        NA |
-|    5      6.741760   -1.764570        NA           NA        NA |
-|    6      6.393730   -0.348030        NA           NA        NA |
-|    7      5.844950   -0.548780        NA           NA        NA |
-|    8      4.063740   -1.781210        NA           NA        NA |
-|    9      3.698330   -0.365410        NA           NA        NA |
-|   10      3.594240   -0.104090        NA           NA        NA |
-
-将第一个主成分放入协变量
-
-### 2.4.2 亲缘关系分析
-+ 利用gemma计算样本间的遗传距离
-```bash
-cd biosoft
-
-wget https://github.com/genetics-statistics/GEMMA/releases/download/v0.98.5/gemma-0.98.5-linux-static-AMD64.gz
-gunzip gemma-0.98.5-linux-static-AMD64.gz
-chmod +x gemma-0.98.5-linux-static-AMD64
-mv gemma-0.98.5-linux-static-AMD64 gemma
-
-gemma -h
-```
-
-```bash
-cd relationship
-
-# kinship
-gemma -bfile ../plink/SNP_qc/SNP_qc -gk 2 -o kin
+# 亲缘关系分析
+biosoft/gemma -bfile plink/SNP_LD -gk -o kinship
 ```
 
 ## 2.5 关联性分析
 ```bash
-# 用法：plink2 --bfile mydata --linear --pheno pheno.txt --mpheno 1 --covar covar.txt --covar-number 1,2,3 --out mydata -noweb --allow-extra-chr
-
-# --linear表示用的连续型线性回归，如果表型是二项式类型，则用--logistic
-# --pheno后面加表型文件（第一列和第二列是 Fanily ID 和 Individual ID;第三列以后的每一列都是表型）
-# --covar后面加协变量文件（第一列和第二列是 Fanily ID 和 Individual ID;第三列以后的每一列都是协变量，可以是之前计算的 pca 主成分）
-# --mpheno 1指的是表型文件的第三列（第一个表型）
-# --covar-number 1,2,3 指的是协变量文件的第三列、第四列和第五列（第一个、第二个和第三个协变量）
-
-# 构建表型文件
-cd data/pheno
-
-sed '1d' FT10.tsv | perl -a -F"\t" -n -e'
-    print "@F[0]\t$_";
-' > pheno.txt
-
 # 关联分析
-cd association
-
-# plink2
-plink2 -bfile ../plink/SNP_qc/SNP_qc --linear --pheno ../data/pheno/pheno.txt --mpheno 1 --covar ../PCA/SNP_qc_pca.eigenvec --covar-number 1 --adjust -noweb --allow-no-sex --out mydata
-
-# 结果存放在 mydata.assoc.linear 文件中,mydata.assoc.linear.adjusted 中存放了校正的p值
-
-# gemma
-gemma -bfile ../plink/SNP_qc/SNP_qc -k ../relationship/output/kin.sXX.txt -lmm 1 -o gemma
-
-# 结果存放在 gemma.assoc.txt 文件夹
+mkdir association
+biosoft/gemma -bfile plink/SNP_LD -lmm -k output/kinship.cXX.txt -o association
 ```
->**.adjusted文件**
->
->GC：Genomic control corrected p-value. Requires an additive model.
->
->BONF：Bonferroni correction adjusted p-value.
->
->HOLM：Holm-Bonferroni adjusted p-value.
->
->SIDAK_SS：Single-step adjusted p-value.
->
->SIDAK_SD：Step-down adjusted p-value.
->
->FDR_BH：Step-up false discovery control
 
 ## 2.6 可视化
-### 2.6.1 曼哈顿图
-+ plink 部分
 ```bash
-sed -i 's/^\s\+//g' mydata.assoc.linear
-sed -i 's/\s\+/\t/g' mydata.assoc.linear
-
-cat mydata.assoc.linear | grep -v "NA" > tem&&
-    mv tem mydata.assoc.linear
-
-tsv-filter -H --str-eq TEST:ADD mydata.assoc.linear > result.tsv
-```
-
-+ gemma 部分
-```bash
-tsv-select -H --fields rs,chr,ps,p_wald gemma.assoc.txt > result.tsv
-sed -i '1d' result.tsv
-(echo -e "SNP\tCHR\tBP\tP" && cat result.tsv) >tem&&
-    mv tem result.tsv
+head -n 3 output/association.assoc.txt
+#chr     rs      ps      n_miss  allele1 allele0 af      beta    se      logl_H1 l_remle p_wald
+#1       SNP4    73      0       A       C       0.105   -5.241239e-03   3.053898e-03    3.925844e+02    5.323277e+00    8.793863e-02
+#1       SNP8    92      0       A       C       0.401   -5.080006e-05   1.985871e-03    3.911600e+02    5.845888e+00    9.796218e-01
 ```
 
 ```R
-install.packages("qqman")
-library(qqman)
-
-FILE <- "result.tsv"
-gwasRESULT <- read.table(FILE, header = TRUE)
-manhattan(gwasRESULT)
-# 默认的 suggestiveline（蓝色） 为 -log10(1e-5),而 genome-wide sigificant（红色） 为 -log10(5e-8)
-
-manhattan(gwasRESULT, suggestiveline = FALSE, annotatePval = 1e-8)
-# 显示校正后 P 值小于 1e-9 的点
+DATA <- read.table("./output/association.assoc.txt", header = T, sep = "\t")
+df <- data.frame(rs=DATA$rs, chr=DATA$chr, pos=DATA$ps, pvalue=DATA$p_wald)
+install.packages("rMVP")
+library(rMVP)
+MVP.Report(df, threshold =5e-8, threshold.col="black")
 ```
-+ plink result
 
-![](./Fig/man.png)
++ 曼哈顿图
+![](./Fig/pvalue.Rectangular-Manhattan..jpg)
 
-可能存在假阳性现象
++ 环形曼哈顿图
+![](./Fig/pvalue.Circular-Manhattan..jpg)
 
-+ gemma result
++ QQ图
+![](./Fig/pvalue.QQplot..jpg)
 
-![](./Fig/gemma.png)
-
-可能是由于只选择了两个 Admixture 分组中的样本，样本有点少，所以没有显著的点
++ SNP密度图
+![](./Fig/pvalue.SNP-Density..jpg)
 
 ## 3 参考
 [1. GWAS 分析](https://zhuanlan.zhihu.com/p/158869408)
@@ -401,4 +255,4 @@ manhattan(gwasRESULT, suggestiveline = FALSE, annotatePval = 1e-8)
 
 [8. 笔记 | GWAS 操作流程3：Plink 关联分析](http://www.360doc.com/content/21/1118/13/77772224_1004706906.shtml)
 
-[9. 关联分析-GEMMA笔记](https://www.jianshu.com/p/82824fa49c87)
+[9. 文献笔记五十四：全基因组关联分析鉴定拟南芥中控制种子大小的调节因子](https://cloud.tencent.com/developer/article/1593313)
